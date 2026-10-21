@@ -9,12 +9,10 @@
 #include <utility>
 #include <vector>
 
-#include "clone_ptr.h"
 #include "debug.h"
 #include "enums.h"
 #include "flexbuffer_json.h"
 #include "generic_factory.h"
-#include "iexamine.h"
 #include "iexamine_actors.h"
 #include "item.h"
 #include "item_factory.h"
