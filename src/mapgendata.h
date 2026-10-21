@@ -156,6 +156,8 @@ class mapgendata
                     ::mission *miss );
 
         std::vector<mapgen_phase> skip;
+        // Leave out item spawns; for callers that only inspect terrain and furniture.
+        bool skip_items = false;
 
         /**
          * Creates a copy of this mapgen data, but stores a different @ref terrain_type.

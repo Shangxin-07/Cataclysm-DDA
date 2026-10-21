@@ -2453,6 +2453,9 @@ class jmapgen_item_group : public jmapgen_piece
         }
         void apply( const mapgendata &dat, const jmapgen_int &x, const jmapgen_int &y, const jmapgen_int &z,
                     const std::string &/*context*/ ) const override {
+            if( dat.skip_items ) {
+                return;
+            }
             dat.m.place_items( group_id, chance.get(), point_bub_ms( x.val, y.val ), point_bub_ms( x.valmax,
                                y.valmax ),
                                dat.zlevel() + z.get(), true,
@@ -2500,6 +2503,9 @@ class jmapgen_loot : public jmapgen_piece
 
         void apply( const mapgendata &dat, const jmapgen_int &x, const jmapgen_int &y, const jmapgen_int &z,
                     const std::string &/*context*/ ) const override {
+            if( dat.skip_items ) {
+                return;
+            }
             if( rng( 0, 99 ) < chance ) {
                 const Item_spawn_data *const isd = &result_group;
                 std::vector<item> spawn;
@@ -2856,6 +2862,9 @@ class jmapgen_spawn_item : public jmapgen_piece
         }
         void apply( const mapgendata &dat, const jmapgen_int &x, const jmapgen_int &y, const jmapgen_int &z,
                     const std::string &/*context*/ ) const override {
+            if( dat.skip_items ) {
+                return;
+            }
             itype_id chosen_id = type.get( dat );
             if( chosen_id.is_null() ) {
                 return;
@@ -7813,6 +7822,8 @@ std::pair<std::map<ter_id, int>, std::map<furn_id, int>> get_changed_ids_from_up
     mapgendata base_fake_md( *tmp_map.cast_to_map(), mapgendata::dummy_settings );
     mapgendata fake_md( base_fake_md, mapgen_args );
     fake_md.skip = { mapgen_phase::zones };
+    // only terrain and furniture are counted, and item placement dominates the cost
+    fake_md.skip_items = true;
 
     if( update_function->second.funcs()[0]->update_map( fake_md ).success() ) {
         for( int z = -OVERMAP_DEPTH; z <= OVERMAP_DEPTH; z++ ) {
