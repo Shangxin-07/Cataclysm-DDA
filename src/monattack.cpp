@@ -63,6 +63,7 @@
 #include "monfaction.h"
 #include "monster.h"
 #include "mtype.h"
+#include "npc.h"
 #include "output.h"
 #include "pathfinding.h"
 #include "pimpl.h"
@@ -3422,9 +3423,21 @@ bool mattack::parrot_at_danger( monster *parrot )
 {
     const map &here = get_map();
 
-    // Zombies parrot, and most of what a zombie can reach is other zombies, so
-    // rule out friendly monsters before spending a random roll on each one.
-    Creature *other = get_creature_tracker().find_reachable( *parrot, [parrot,
+    // Zombies parrot, and most of what a zombie can reach is other zombies.
+    // A monster only counts if its faction hates the parrot's (or is angry and
+    // goes by mood), so skip whole factions that can't, unless a character is
+    // in one: characters are judged by their own attitude below.
+    std::vector<mfaction_id> character_factions{ get_player_character().get_monster_faction() };
+    for( npc &guy : g->all_npcs() ) {
+        character_factions.push_back( guy.get_monster_faction() );
+    }
+    const auto faction_may_qualify = [parrot, &character_factions]( const mfaction_id & faction ) {
+        const mf_attitude att = faction->attitude( parrot->faction );
+        return att == mf_attitude::MFA_HATE || att == mf_attitude::MFA_BY_MOOD ||
+               std::find( character_factions.begin(), character_factions.end(),
+                          faction ) != character_factions.end();
+    };
+    Creature *other = get_creature_tracker().find_reachable( *parrot, faction_may_qualify, [parrot,
     &here]( Creature * creature ) {
         if( creature->is_hallucination() ) {
             return false;
