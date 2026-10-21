@@ -51,7 +51,7 @@ void turn_profiler::report( std::FILE *out )
     } );
     for( size_t i = 0; i < phase_count; ++i ) {
         const double ms = std::chrono::duration<double, std::milli>( phases[i].total ).count();
-        std::fprintf( out, "  %-32s %10.1f ms %8d calls %9.3f ms/call\n", phases[i].name, ms,
-                      phases[i].calls, ms / phases[i].calls );
+        ( void )std::fprintf( out, "  %-32s %10.1f ms %8d calls %9.3f ms/call\n", phases[i].name, ms,
+                              phases[i].calls, ms / phases[i].calls );
     }
 }

@@ -30,6 +30,8 @@ static const efftype_id effect_sleep( "sleep" );
 static const mtype_id mon_zombie( "mon_zombie" );
 static const mtype_id mon_zombie_dog( "mon_zombie_dog" );
 
+static const npc_template_id npc_template_test_talker( "test_talker" );
+
 static const trait_id trait_DEBUG_NODMG( "DEBUG_NODMG" );
 static const trait_id trait_DEBUG_NOTEMP( "DEBUG_NOTEMP" );
 
@@ -39,7 +41,7 @@ static const trait_id trait_DEBUG_NOTEMP( "DEBUG_NOTEMP" );
 static int env_int( const char *name, int fallback )
 {
     const char *v = std::getenv( name );
-    return v ? std::atoi( v ) : fallback;
+    return v ? static_cast<int>( std::strtol( v, nullptr, 10 ) ) : fallback;
 }
 
 TEST_CASE( "turn_throughput_city", "[.][turn_benchmark]" )
@@ -56,9 +58,9 @@ TEST_CASE( "turn_throughput_city", "[.][turn_benchmark]" )
     const tripoint_abs_sm start = project_to<coords::sm>( u.pos_abs() );
     city_reference city = overmap_buffer.closest_city( start );
     REQUIRE( city );
-    const auto t_load0 = std::chrono::steady_clock::now();
+    const std::chrono::steady_clock::time_point t_load0 = std::chrono::steady_clock::now();
     g->place_player_overmap( project_to<coords::omt>( city.abs_sm_pos ) );
-    const auto t_load1 = std::chrono::steady_clock::now();
+    const std::chrono::steady_clock::time_point t_load1 = std::chrono::steady_clock::now();
 
     // place_player_overmap can leave the avatar off the new map when the
     // destination tile is occupied; put them back in the middle
@@ -95,7 +97,7 @@ TEST_CASE( "turn_throughput_city", "[.][turn_benchmark]" )
             get_creature_tracker().creature_at( p ) ) {
             continue;
         }
-        here.place_npc( p.xy(), npc_template_id( "test_talker" ) );
+        here.place_npc( p.xy(), npc_template_test_talker );
         ++npcs_placed;
     }
     g->load_npcs();
@@ -116,12 +118,12 @@ TEST_CASE( "turn_throughput_city", "[.][turn_benchmark]" )
     u.set_moves( 0 );
     g->do_turn();
     turn_profiler::reset();
-    const auto t0 = std::chrono::steady_clock::now();
+    const std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
     for( int t = 0; t < turns; ++t ) {
         u.set_moves( 0 );
         g->do_turn();
     }
-    const auto t1 = std::chrono::steady_clock::now();
+    const std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
     const double ms = std::chrono::duration<double, std::milli>( t1 - t0 ).count();
     std::printf( "turn_benchmark: load %.1f ms; %d monsters (%zu alive at end), %d npcs; "
                  "%d turns in %.1f ms = %.3f ms/turn\n",
