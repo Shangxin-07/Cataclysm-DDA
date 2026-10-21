@@ -1168,11 +1168,17 @@ bool map::pl_sees( const tripoint_bub_ms &t, const int max_range ) const
     }
 
     const apparent_light_info a = apparent_light_helper( map_cache, t );
+    if( a.obstructed ) {
+        return false;
+    }
+    // The vision threshold never exceeds LIGHT_AMBIENT_LOW and is costly to compute,
+    // so skip it when the tile is bright enough or lit by the sun anyway.
+    if( a.apparent_light >= LIGHT_AMBIENT_LOW || map_cache.sm[t.x()][t.y()] > 0.0 ) {
+        return true;
+    }
     // avatar might not be on *this* map
     const float light_at_player = get_map().ambient_light_at( player_character.pos_bub() );
-    return !a.obstructed &&
-           ( a.apparent_light >= player_character.get_vision_threshold( light_at_player ) ||
-             map_cache.sm[t.x()][t.y()] > 0.0 );
+    return a.apparent_light >= player_character.get_vision_threshold( light_at_player );
 }
 
 // For a direction vector defined by x, y, return the quadrant that's the
