@@ -1,27 +1,29 @@
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
+#include <memory>
+#include <ratio>
 #include <string>
 
 #include "avatar.h"
 #include "calendar.h"
 #include "cata_catch.h"
+#include "character_id.h"
 #include "coordinates.h"
+#include "creature.h"
 #include "creature_tracker.h"
-#include "field_type.h"
 #include "game.h"
 #include "map.h"
-#include "map_helpers.h"
 #include "map_scale_constants.h"
 #include "monster.h"
 #include "npc.h"
 #include "overmapbuffer.h"
 #include "player_helpers.h"
-#include "veh_type.h"
-#include "vpart_position.h"
 #include "point.h"
 #include "rng.h"
 #include "turn_profiler.h"
 #include "type_id.h"
+#include "vpart_position.h"
 
 static const efftype_id effect_sleep( "sleep" );
 
@@ -105,7 +107,8 @@ TEST_CASE( "turn_throughput_city", "[.][turn_benchmark]" )
         here.add_field( center + point( rng( -15, 15 ), rng( -15, 15 ) ), field_type_id( "fd_fire" ), 3 );
     }
 
-    std::printf( "bench: avatar at %s, abs_sub %s\n", u.pos_bub().to_string().c_str(), here.get_abs_sub().to_string().c_str() );
+    std::printf( "bench: avatar at %s, abs_sub %s\n", u.pos_bub().to_string().c_str(),
+                 here.get_abs_sub().to_string().c_str() );
     u.add_effect( effect_sleep, 1000_days );
     u.set_moves( 0 );
 
