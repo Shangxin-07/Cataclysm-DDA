@@ -1565,6 +1565,12 @@ python-check:
 tests: version $(BUILD_PREFIX)cataclysm.a $(LOCALIZE_TEST_DEPS)
 	$(MAKE) -C tests
 
+bench: version $(BUILD_PREFIX)cataclysm.a $(LOCALIZE_TEST_DEPS)
+	$(MAKE) -C tests bench
+
+subset: version $(BUILD_PREFIX)cataclysm.a $(LOCALIZE_TEST_DEPS)
+	$(MAKE) -C tests subset
+
 check: version $(BUILD_PREFIX)cataclysm.a $(LOCALIZE_TEST_DEPS)
 	$(MAKE) -C tests check
 

@@ -71,6 +71,7 @@
 #include "stats_tracker.h"
 #include "string_formatter.h"
 #include "timed_event.h"
+#include "turn_profiler.h"
 #include "translations.h"
 #include "type_id.h"
 #include "uilist.h"
@@ -364,6 +365,7 @@ void monmove()
         }
 
         if( !critter.is_dead() ) {
+            turn_profiler::scope prof( "monmove: monster process_turn" );
             critter.process_turn();
         }
 
@@ -380,12 +382,16 @@ void monmove()
             // Controlled critters don't make their own plans
             if( !critter.has_effect( effect_controlled ) ) {
                 // Formulate a path to follow
+                turn_profiler::scope prof( "monmove: monster plan" );
                 critter.plan();
             } else {
                 critter.set_moves( 0 );
                 break;
             }
-            critter.move(); // Move one square, possibly hit u
+            {
+                turn_profiler::scope prof( "monmove: monster move" );
+                critter.move(); // Move one square, possibly hit u
+            }
             critter.process_triggers();
             m.creature_in_field( critter );
         }
@@ -414,10 +420,14 @@ void monmove()
     // The remaining monsters are all alive, but may be outside of the reality bubble.
     // If so, despawn them. This is not the same as dying, they will be stored for later and the
     // monster::die function is not called.
-    g->despawn_nonlocal_monsters();
+    {
+        turn_profiler::scope prof( "monmove: despawn_nonlocal" );
+        g->despawn_nonlocal_monsters();
+    }
 
     // Now, do active NPCs.
     for( npc &guy : g->all_npcs() ) {
+        turn_profiler::scope prof( "monmove: npc turn" );
         process_npc_turn( m, guy );
     }
     g->cleanup_dead();
@@ -532,6 +542,7 @@ void game::handle_progress_ui()
 
 bool game::do_turn()
 {
+    turn_profiler::scope prof_turn( "do_turn (total)" );
     if( is_game_over() ) {
         return turn_handler::cleanup_at_end();
     }
@@ -545,7 +556,10 @@ bool game::do_turn()
         new_game = false;
         weather.on_game_start();
     } else {
-        gamemode->per_turn();
+        // the test harness never runs start_game(), so gamemode can be unset
+        if( gamemode ) {
+            gamemode->per_turn();
+        }
         calendar::turn += 1_turns;
     }
     //used for dimension swapping
@@ -562,12 +576,18 @@ bool game::do_turn()
     }
 
     timed_event_manager &timed_events = get_timed_events();
-    timed_events.process();
+    {
+        turn_profiler::scope prof( "timed_events" );
+        timed_events.process();
+    }
     get_item_wakeups().process( calendar::turn );
     if( calendar::once_every( 1_hours ) ) {
         get_craft_reservations().sweep_expired_records();
     }
-    mission::process_all();
+    {
+        turn_profiler::scope prof( "missions" );
+        mission::process_all();
+    }
     avatar &u = get_avatar();
     map &m = get_map();
     // If controlling a vehicle that is owned by someone else
@@ -593,7 +613,10 @@ bool game::do_turn()
     }
 
     // Move hordes every turn, move_hordes has its own rate limiting
-    overmap_buffer.move_hordes();
+    {
+        turn_profiler::scope prof( "move_hordes" );
+        overmap_buffer.move_hordes();
+    }
     if( calendar::once_every( time_duration::from_minutes( 2.5 ) ) ) {
         if( u.has_trait( trait_HAS_NEMESIS ) ) {
             overmap_buffer.move_nemesis();
@@ -602,7 +625,10 @@ bool game::do_turn()
 
     debug_hour_timer.print_time();
 
-    u.update_body();
+    {
+        turn_profiler::scope prof( "avatar_update_body" );
+        u.update_body();
+    }
 
     // Auto-save if autosave is enabled
     if( get_option<bool>( "AUTOSAVE" ) &&
@@ -611,12 +637,18 @@ bool game::do_turn()
         autosave();
     }
 
-    weather.update_weather();
+    {
+        turn_profiler::scope prof( "update_weather" );
+        weather.update_weather();
+    }
 
     reset_light_level();
     m.mark_turn_light_dirty();
 
-    perhaps_add_random_npc( /* ignore_spawn_timers_and_rates = */ false );
+    {
+        turn_profiler::scope prof( "random_npc" );
+        perhaps_add_random_npc( /* ignore_spawn_timers_and_rates = */ false );
+    }
 
     // process avatar activities (ignoring user input)
     u.process_activity();
@@ -631,7 +663,10 @@ bool game::do_turn()
     music::deactivate_music_id( music::music_id::sound );
 
     // Process sound events into sound markers for display to the player.
-    sounds::process_sound_markers( &u );
+    {
+        turn_profiler::scope prof( "sound_markers" );
+        sounds::process_sound_markers( &u );
+    }
 
     if( u.is_deaf() ) {
         sfx::do_hearing_loss();
@@ -726,37 +761,76 @@ bool game::do_turn()
         scent.set( u.pos_bub(), u.scent, u.get_type_of_scent() );
         overmap_buffer.set_scent( u.pos_abs_omt(),  u.scent );
     }
-    scent.update( u.pos_bub(), m );
+    {
+        turn_profiler::scope prof( "scent_update" );
+        scent.update( u.pos_bub(), m );
+    }
 
     // We need floor cache before checking falling 'n stuff
-    m.build_floor_caches();
+    {
+        turn_profiler::scope prof( "build_floor_caches" );
+        m.build_floor_caches();
+    }
 
-    m.process_falling();
-    m.vehmove();
-    m.process_fields();
-    m.process_items();
+    {
+        turn_profiler::scope prof( "process_falling" );
+        m.process_falling();
+    }
+    {
+        turn_profiler::scope prof( "vehmove" );
+        m.vehmove();
+    }
+    {
+        turn_profiler::scope prof( "process_fields" );
+        m.process_fields();
+    }
+    {
+        turn_profiler::scope prof( "process_items" );
+        m.process_items();
+    }
     explosion_handler::process_explosions();
-    m.creature_in_field( u );
+    {
+        turn_profiler::scope prof( "creature_in_field" );
+        m.creature_in_field( u );
+    }
 
     // Apply sounds from previous turn to monster and NPC AI.
-    sounds::process_sounds();
+    {
+        turn_profiler::scope prof( "process_sounds" );
+        sounds::process_sounds();
+    }
     const int levz = m.get_abs_sub().z();
     // Update vision caches for monsters. If this turns out to be expensive,
     // consider a stripped down cache just for monsters.
-    m.build_map_cache( levz, true );
+    {
+        turn_profiler::scope prof( "build_map_cache" );
+        m.build_map_cache( levz, true );
+    }
 
     // process monster and npc turn
-    monmove();
+    {
+        turn_profiler::scope prof( "monmove" );
+        monmove();
+    }
 
     if( calendar::once_every( time_between_npc_OM_moves ) ) {
         overmap_npc_move();
     }
-    m.furniture_terrain_emit_fields();
+    {
+        turn_profiler::scope prof( "emit_fields" );
+        m.furniture_terrain_emit_fields();
+    }
     // required after monsters move and fields emit
-    mon_info_update();
+    {
+        turn_profiler::scope prof( "mon_info_update" );
+        mon_info_update();
+    }
 
     // replenish avatar moves
-    u.process_turn();
+    {
+        turn_profiler::scope prof( "avatar_process_turn" );
+        u.process_turn();
+    }
 
     if( u.get_moves() < 0 && get_option<bool>( "FORCE_REDRAW" ) ) {
         ui_manager::redraw();
@@ -767,9 +841,15 @@ bool game::do_turn()
         handle_weather_effects( weather.weather_id );
     }
 
-    handle_progress_ui();
+    {
+        turn_profiler::scope prof( "progress_ui" );
+        handle_progress_ui();
+    }
 
-    u.update_bodytemp();
+    {
+        turn_profiler::scope prof( "avatar_bodytemp" );
+        u.update_bodytemp();
+    }
     u.update_body_wetness( *weather.weather_precise );
     u.apply_wetness_morale( weather.temperature );
 

@@ -3422,22 +3422,23 @@ bool mattack::parrot_at_danger( monster *parrot )
 {
     const map &here = get_map();
 
+    // Zombies parrot, and most of what a zombie can reach is other zombies, so
+    // rule out friendly monsters before spending a random roll on each one.
     Creature *other = get_creature_tracker().find_reachable( *parrot, [parrot,
     &here]( Creature * creature ) {
-        if( !creature->is_hallucination() && one_in( 20 ) ) {
-            if( creature->is_avatar() || creature->is_npc() ) {
-                Character *character = creature->as_character();
-                return character->attitude_to( *parrot ) == Creature::Attitude::HOSTILE &&
-                       parrot->sees( here, *character );
-            } else {
-                monster *monster = creature->as_monster();
-                return ( monster->faction->attitude( parrot->faction ) == mf_attitude::MFA_HATE ||
-                         ( monster->anger > 0 &&
-                           monster->faction->attitude( parrot->faction ) == mf_attitude::MFA_BY_MOOD ) ) &&
-                       parrot->sees( here, *monster );
-            }
+        if( creature->is_hallucination() ) {
+            return false;
         }
-        return false;
+        if( creature->is_avatar() || creature->is_npc() ) {
+            Character *character = creature->as_character();
+            return one_in( 20 ) && character->attitude_to( *parrot ) == Creature::Attitude::HOSTILE &&
+                   parrot->sees( here, *character );
+        }
+        monster *monster = creature->as_monster();
+        const mf_attitude att = monster->faction->attitude( parrot->faction );
+        return ( att == mf_attitude::MFA_HATE ||
+                 ( monster->anger > 0 && att == mf_attitude::MFA_BY_MOOD ) ) &&
+               one_in( 20 ) && parrot->sees( here, *monster );
     } );
 
     if( other ) {

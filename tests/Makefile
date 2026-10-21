@@ -67,6 +67,29 @@ endif
 
 tests: $(TEST_TARGET)
 
+# Small binary with just the profiling benchmarks, so they build without the whole suite.
+BENCH_TARGET = $(BUILD_PREFIX)cata_bench
+BENCH_SOURCES = test_main.cpp turn_benchmark_test.cpp player_helpers.cpp options_helpers.cpp fake_messages.cpp stringmaker.cpp test_statistics.cpp
+BENCH_OBJS = $(sort $(BENCH_SOURCES:%.cpp=$(ODIR)/%.o))
+
+bench: $(BENCH_TARGET)
+
+# Tests that cover the code the benchmark-driven changes touch.
+SUBSET_TARGET = $(BUILD_PREFIX)cata_subset
+SUBSET_SOURCES = test_main.cpp player_helpers.cpp options_helpers.cpp fake_messages.cpp \
+  stringmaker.cpp test_statistics.cpp monster_helpers.cpp monster_test.cpp map_helpers_tests.cpp \
+  monster_attack_test.cpp monster_vision_test.cpp vehicle_turrets_test.cpp vehicle_test.cpp \
+  npc_test.cpp npc_turn_helpers.cpp map_test_case.cpp cata_generators.cpp
+SUBSET_OBJS = $(sort $(SUBSET_SOURCES:%.cpp=$(ODIR)/%.o))
+
+subset: $(SUBSET_TARGET)
+
+$(SUBSET_TARGET): $(SUBSET_OBJS) $(CATA_LIB)
+	+$(CXX) $(W32FLAGS) -o $@ $(DEFINES) $(SUBSET_OBJS) $(CATA_LIB) $(CPPFLAGS) $(CXXFLAGS) $(LDFLAGS)
+
+$(BENCH_TARGET): $(BENCH_OBJS) $(CATA_LIB)
+	+$(CXX) $(W32FLAGS) -o $@ $(DEFINES) $(BENCH_OBJS) $(CATA_LIB) $(CPPFLAGS) $(CXXFLAGS) $(LDFLAGS)
+
 $(TEST_TARGET): $(OBJS) $(CATA_LIB)
 	+$(CXX) $(W32FLAGS) -o $@ $(DEFINES) $(OBJS) $(CATA_LIB) $(CPPFLAGS) $(CXXFLAGS) $(LDFLAGS)
 
