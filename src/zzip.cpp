@@ -414,7 +414,7 @@ std::optional<zzip> zzip::load(
         dctx = it->second.dctx;
     } else {
         cctx = ZSTD_createCCtx();
-        ZSTD_CCtx_setParameter( cctx, ZSTD_c_compressionLevel, 7 );
+        ZSTD_CCtx_setParameter( cctx, ZSTD_c_compressionLevel, 3 );
         dctx = ZSTD_createDCtx();
 
         std::vector<char> dictionary;
