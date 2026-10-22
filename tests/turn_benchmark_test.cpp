@@ -37,7 +37,7 @@ static const trait_id trait_DEBUG_NOTEMP( "DEBUG_NOTEMP" );
 
 // Whole-turn throughput on a real generated city, for profiling.
 // Run with: tests/cata_test "[turn_benchmark]"
-// Tune with env BENCH_TURNS, BENCH_MONSTERS, BENCH_NPCS.
+// Tune with env BENCH_TURNS, BENCH_MONSTERS, BENCH_NPCS, BENCH_SEED.
 static int env_int( const char *name, int fallback )
 {
     const char *v = std::getenv( name );
@@ -49,12 +49,19 @@ TEST_CASE( "turn_throughput_city", "[.][turn_benchmark]" )
     const int turns = env_int( "BENCH_TURNS", 600 );
     const int n_monsters = env_int( "BENCH_MONSTERS", 150 );
     const int n_npcs = env_int( "BENCH_NPCS", 6 );
+    const int seed = env_int( "BENCH_SEED", 12345 );
 
-    rng_set_engine_seed( 12345 );
+    // Data loading draws from the RNG, so how much it draws decides the overmaps
+    // generated after it. Start them over from a fixed seed so code changes to
+    // loading don't change the scene being measured.
+    rng_set_engine_seed( static_cast<unsigned int>( seed ) );
+    overmap_buffer.clear();
     clear_avatar();
     avatar &u = get_avatar();
     map &here = get_map();
 
+    // closest_city only searches overmaps that exist; generate the one we're on
+    overmap_buffer.ter( project_to<coords::omt>( u.pos_abs() ) );
     const tripoint_abs_sm start = project_to<coords::sm>( u.pos_abs() );
     city_reference city = overmap_buffer.closest_city( start );
     REQUIRE( city );

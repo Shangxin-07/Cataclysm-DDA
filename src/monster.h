@@ -104,6 +104,8 @@ class monster : public Creature
         mfaction_id get_monster_faction() const override {
             return faction.id();
         }
+        // Changes faction and keeps the creature tracker's per-faction zones in step.
+        void set_faction( const mfaction_id &new_faction );
         void gravity_check() override;
         void gravity_check( map *here ) override;
         void poly( const mtype_id &id );

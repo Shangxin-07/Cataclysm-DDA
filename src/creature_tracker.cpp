@@ -1,6 +1,8 @@
 #include "creature_tracker.h"
 
 #include <algorithm>
+#include <array>
+#include <bitset>
 #include <limits>
 #include <ostream>
 #include <string>
@@ -13,6 +15,7 @@
 #include "flood_fill.h"
 #include "game.h"
 #include "map.h"
+#include "map_scale_constants.h"
 #include "mapdata.h"
 #include "maptile_fwd.h"
 #include "mongroup.h"
@@ -366,6 +369,25 @@ void creature_tracker::flood_fill_zone( const Creature &origin )
     }
 
     map &here = get_map();
+
+    // Most filled tiles are empty; mark the occupied ones up front so the
+    // visitor below only does the creature lookup where there is a creature.
+    std::array<std::array<std::bitset<MAPSIZE_Y>, MAPSIZE_X>, OVERMAP_LAYERS> occupied;
+    const auto mark_occupied = [&here, &occupied]( const tripoint_abs_ms & abs ) {
+        const tripoint_bub_ms p = here.get_bub( abs );
+        if( here.inbounds( p ) ) {
+            occupied[p.z() + OVERMAP_DEPTH][p.x()].set( p.y() );
+        }
+    };
+    for( const std::pair<const tripoint_abs_ms, shared_ptr_fast<monster>> &mon :
+         monsters_by_location ) {
+        mark_occupied( mon.first );
+    }
+    for( const shared_ptr_fast<npc> &guy : active_npc ) {
+        mark_occupied( guy->pos_abs() );
+    }
+    mark_occupied( get_avatar().pos_abs() );
+
     ff::flood_fill_visit_10_connected( origin.pos_bub(),
     [&here]( const tripoint_bub_ms & loc, int direction ) {
         if( direction == 0 ) {
@@ -407,7 +429,10 @@ void creature_tracker::flood_fill_zone( const Creature &origin )
         }
         return false;
     },
-    [this]( const tripoint_bub_ms & loc ) {
+    [this, &occupied]( const tripoint_bub_ms & loc ) {
+        if( !occupied[loc.z() + OVERMAP_DEPTH][loc.x()][loc.y()] ) {
+            return;
+        }
         if( Creature *creature = this->creature_at<Creature>( loc, true ) ) {
             if( shared_ptr_fast<Creature> ptr = g->shared_from( *creature ) ) {
                 const int n = zone_number_ * zone_tick_;

@@ -391,7 +391,7 @@ void monster::poly( const mtype_id &id )
         mon_special_attack &entry = special_attacks[sa.first];
         entry.cooldown = sa.second->cooldown.evaluate( d );
     }
-    faction = type->default_faction;
+    set_faction( type->default_faction );
     upgrades = type->upgrades;
     reproduces = type->reproduces;
     biosignatures = type->biosignatures;
@@ -3796,7 +3796,16 @@ void monster::make_friendly()
 void monster::make_ally( const monster &z )
 {
     friendly = z.friendly;
-    faction = z.faction;
+    set_faction( z.faction );
+}
+
+void monster::set_faction( const mfaction_id &new_faction )
+{
+    if( faction != new_faction ) {
+        faction = new_faction;
+        // creatures in each reachable zone are grouped by faction
+        get_creature_tracker().invalidate_reachability_cache();
+    }
 }
 
 void monster::add_item( const item &it )

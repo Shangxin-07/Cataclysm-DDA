@@ -1,7 +1,7 @@
 #include "ammo.h"
 
 #include <algorithm>
-#include <functional>
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
@@ -9,12 +9,10 @@
 #include <utility>
 #include <vector>
 
-#include "clone_ptr.h"
 #include "debug.h"
 #include "enums.h"
 #include "flexbuffer_json.h"
 #include "generic_factory.h"
-#include "iexamine.h"
 #include "iexamine_actors.h"
 #include "item.h"
 #include "item_factory.h"
@@ -124,6 +122,46 @@ void ammunition_type::check_consistency()
     const bool skip_all_unused_checks = std::find( loaded_mods.begin(), loaded_mods.end(),
                                         MOD_INFORMATION_generic_guns ) != loaded_mods.end();
 
+    // Work out, in one pass over items and map data, which ammo types something
+    // can fire and how many solid items each ammo type has, instead of
+    // rebuilding an item for every itype once per ammo type.
+    std::set<ammotype> fired_ammo;
+    std::map<ammotype, int> solid_ammo_count;
+    if( !skip_all_unused_checks ) {
+        for( const itype *t : item_controller->all() ) {
+            // Either we use this ammo directly (i.e. we're a gun), or we're a weapon mod
+            // (a bore, or another type of gunmod) that lets a gun use this ammo.
+            const item maybe_ammo_user( t->get_id() );
+            const std::set<ammotype> used = maybe_ammo_user.ammo_types();
+            fired_ammo.insert( used.begin(), used.end() );
+            if( t->mod ) {
+                fired_ammo.insert( t->mod->ammo_modifier.begin(), t->mod->ammo_modifier.end() );
+            }
+            if( t->ammo && t->phase == phase_id::SOLID ) {
+                ++solid_ammo_count[t->ammo->type];
+            }
+        }
+        // Mortars fire ammo from terrain and furniture.
+        const auto add_mortar_ammo = [&fired_ammo]( const auto & ter_furn ) {
+            if( !ter_furn.has_examine( "mortar" ) ) {
+                return;
+            }
+            for( const auto &examiner : ter_furn.get_examine() ) {
+                if( const mortar_examine_actor *actor = dynamic_cast<const mortar_examine_actor *>
+                                                        ( examiner.get() ) ) {
+                    const std::vector<ammotype> mortar_ammo = actor->get_ammotypes();
+                    fired_ammo.insert( mortar_ammo.begin(), mortar_ammo.end() );
+                }
+            }
+        };
+        for( const ter_t &ter : mapdata::terrain_data.get_all() ) {
+            add_mortar_ammo( ter );
+        }
+        for( const furn_t &furn : mapdata::furniture_data.get_all() ) {
+            add_mortar_ammo( furn );
+        }
+    }
+
     for( const auto &ammo : all_ammunition_types() ) {
         const auto &id = ammo.first;
         const itype_id &at = ammo.second.default_ammotype_;
@@ -140,65 +178,20 @@ void ammunition_type::check_consistency()
             continue;
         }
 
-
-        std::vector<const itype *> shoots_this_ammo = Item_factory::find( [&]( const itype & t ) {
-            item maybe_ammo_user( t.get_id() );
-            // Either we use this ammo directly (i.e. we're a gun), or we're a weapon mod (a bore, or another type of gunmod) that lets a gun use this ammo.
-            return maybe_ammo_user.ammo_types().count( id ) ||
-                   ( t.mod && t.mod->ammo_modifier.count( id ) );
-        } );
-
-        // Horrible terrain iteration to check if there's any mortars firing this.
-        for( const ter_t &some_ter_furn : mapdata::terrain_data.get_all() ) {
-            if( some_ter_furn.has_examine( "mortar" ) ) {
-                for( auto &examiner : some_ter_furn.get_examine() ) {
-                    mortar_examine_actor *actor = dynamic_cast<mortar_examine_actor *>( examiner.get() );
-                    if( actor ) {
-                        for( const ammotype &some_ammo : actor->get_ammotypes() ) {
-                            if( some_ammo == id ) {
-                                // These IDs are never dereferenced, so it's fine.
-                                shoots_this_ammo.push_back( &*itype_id::NULL_ID() );
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Guess what? We get to do it again with furniture.
-        for( const furn_t &some_ter_furn : mapdata::furniture_data.get_all() ) {
-            if( some_ter_furn.has_examine( "mortar" ) ) {
-                for( auto &examiner : some_ter_furn.get_examine() ) {
-                    mortar_examine_actor *actor = dynamic_cast<mortar_examine_actor *>( examiner.get() );
-                    if( actor ) {
-                        for( const ammotype &some_ammo : actor->get_ammotypes() ) {
-                            if( some_ammo == id ) {
-                                shoots_this_ammo.push_back( &*itype_id::NULL_ID() );
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        std::vector<const itype *> solid_types_as_this_ammo = Item_factory::find( [&]( const itype & t ) {
-            return t.ammo && t.ammo->type == id && t.phase == phase_id::SOLID;
-        } );
-
+        const std::map<ammotype, int>::const_iterator solid_iter = solid_ammo_count.find( id );
+        const int solid_types_as_this_ammo = solid_iter == solid_ammo_count.end() ? 0 : solid_iter->second;
 
         const bool is_whitelisted = whitelist.count( id );
 
         // Liquids still need charge handling, so a ton of liquids need their own fake ammo types.
-        const bool is_liquid_sole_type = solid_types_as_this_ammo.empty();
+        const bool is_liquid_sole_type = solid_types_as_this_ammo == 0;
 
-        if( shoots_this_ammo.empty() && !is_whitelisted && !is_liquid_sole_type ) {
+        if( !fired_ammo.count( id ) && !is_whitelisted && !is_liquid_sole_type ) {
             debugmsg( "ammotype %s exists but is unused", id.c_str() );
         }
 
         // The whitelist is specifically locked down to prevent shoving anything in there that doesn't strictly need to be in there.
-        if( is_whitelisted && solid_types_as_this_ammo.size() > 1 ) {
+        if( is_whitelisted && solid_types_as_this_ammo > 1 ) {
             debugmsg( "whitelisted ammo type %s has more than one entry.", id.c_str() );
         }
 
