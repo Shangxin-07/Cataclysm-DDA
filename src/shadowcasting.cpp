@@ -1,5 +1,7 @@
 #include "shadowcasting.h"
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstdlib>
 #include <iterator>
@@ -47,6 +49,18 @@ bool operator==( const slope &lhs, const slope &rhs )
     return lhs.rise * rhs.run == rhs.rise * lhs.run;
 }
 
+// Smallest i >= 0 whose leading edge slope( 2 * i + 1, run ) is not below start,
+// so a scan can begin there instead of skipping the tiles in front of a span.
+int first_leading_edge_at( const slope &start, const int run )
+{
+    // ( 2i + 1 ) * start.run >= start.rise * run
+    const int needed = start.rise * run - start.run;
+    if( needed <= 0 ) {
+        return 0;
+    }
+    return ( needed + 2 * start.run - 1 ) / ( 2 * start.run );
+}
+
 template<typename T>
 struct span {
     span( const slope &s_major, const slope &e_major,
@@ -69,6 +83,41 @@ struct span {
  * Handle splitting the current span in cast_horizontal_zlight_segment and
  * cast_vertical_zlight_segment to avoid as much code duplication as possible
  */
+/**
+ * calc's results for one cumulative value at each distance, since the tiles of a span
+ * share that value and most of them share a distance with a neighbour.
+ */
+template<typename T, T( *calc )( const T &, const T &, const int & )>
+class intensity_memo
+{
+    public:
+        explicit intensity_memo( const T &numerator ) : numerator_( numerator ) {}
+
+        T get( const T &cumulative, const int distance ) {
+            if( distance < 0 || distance >= max_distance ) {
+                return calc( numerator_, cumulative, distance );
+            }
+            if( !( cumulative == cumulative_ ) || generation_ == 0 ) {
+                cumulative_ = cumulative;
+                ++generation_;
+            }
+            if( filled_[distance] != generation_ ) {
+                filled_[distance] = generation_;
+                values_[distance] = calc( numerator_, cumulative, distance );
+            }
+            return values_[distance];
+        }
+
+    private:
+        // past MAX_VIEW_DISTANCE on all three axes, plus room for an offset
+        static constexpr int max_distance = 256;
+        T numerator_;
+        T cumulative_ = T();
+        unsigned generation_ = 0;
+        std::array<unsigned, max_distance> filled_ = {};
+        std::array<T, max_distance> values_ = {};
+};
+
 template<typename T, bool( *is_transparent )( const T &, const T & ), T( *accumulate )( const T &, const T &, const int & )>
 static void split_span( cata::list<span<T>> &spans,
                         typename cata::list<span<T>>::iterator &this_span,
@@ -176,6 +225,8 @@ static void cast_horizontal_zlight_segment(
 
     constexpr int min_z = -OVERMAP_DEPTH;
     constexpr int max_z = OVERMAP_HEIGHT;
+    // levels past the top or bottom of the map are skipped without effect
+    const int levels_ahead = z_transform > 0 ? max_z - offset.z() : offset.z() - min_z;
     static half_open_rectangle<point_bub_ms> bounds( point_bub_ms::zero, point_bub_ms( MAPSIZE_X,
             MAPSIZE_Y ) );
 
@@ -183,6 +234,7 @@ static void cast_horizontal_zlight_segment(
 
     T last_intensity( 0.0 );
     tripoint_rel_ms delta;
+    intensity_memo<T, calc> intensities( numerator );
     tripoint_bub_ms current;
 
     // We start out with one span covering the entire horizontal and vertical space
@@ -204,7 +256,8 @@ static void cast_horizontal_zlight_segment(
         for( auto this_span = spans.begin(); this_span != spans.end(); ) {
             bool started_block = false;
             // TODO: Precalculate min/max delta.z based on start/end and distance
-            for( delta.z() = 0; delta.z() <= distance; delta.z()++ ) {
+            for( delta.z() = first_leading_edge_at( this_span->start_major, distance * 2 - 1 );
+                 delta.z() <= std::min( distance, levels_ahead ); delta.z()++ ) {
                 // Shadowcasting sweeps from the cardinal to the most extreme edge of the octant
                 // XXXX
                 // --->
@@ -251,7 +304,8 @@ static void cast_horizontal_zlight_segment(
 
                 bool started_span = false;
                 const int z_index = current.z() + OVERMAP_DEPTH;
-                for( delta.x() = 0; delta.x() <= distance; delta.x()++ ) {
+                for( delta.x() = first_leading_edge_at( this_span->start_minor, distance * 2 - 1 );
+                     delta.x() <= distance; delta.x()++ ) {
                     current.x() = offset.x() + delta.x() * xx_transform + delta.y() * xy_transform;
                     current.y() = offset.y() + delta.x() * yx_transform + delta.y() * yy_transform;
                     // See definition of trailing_edge_major and leading_edge_major for clarification.
@@ -303,7 +357,7 @@ static void cast_horizontal_zlight_segment(
                     }
 
                     const int dist = rl_dist( tripoint_rel_ms::zero, delta ) + offset_distance;
-                    last_intensity = calc( numerator, this_span->cumulative_value, dist );
+                    last_intensity = intensities.get( this_span->cumulative_value, dist );
 
                     if( !floor_block ) {
                         ( *output_caches[z_index] )[current.x()][current.y()] =
@@ -378,6 +432,7 @@ static void cast_vertical_zlight_segment(
 
     T last_intensity( 0.0 );
     tripoint_rel_ms delta;
+    intensity_memo<T, calc> intensities( numerator );
     tripoint_bub_ms current;
 
     // We start out with one span covering the entire horizontal and vertical space
@@ -398,7 +453,8 @@ static void cast_vertical_zlight_segment(
 
         for( auto this_span = spans.begin(); this_span != spans.end(); ) {
             bool started_block = false;
-            for( delta.y() = 0; delta.y() <= distance; delta.y()++ ) {
+            for( delta.y() = first_leading_edge_at( this_span->start_major, distance * 2 - 1 );
+                 delta.y() <= distance; delta.y()++ ) {
                 // See comment above trailing_edge_major and leading_edge_major in above function.
                 const slope trailing_edge_major( delta.y() * 2 - 1, delta.z() * 2 + 1 );
                 const slope leading_edge_major( delta.y() * 2 + 1, delta.z() * 2 - 1 );
@@ -429,7 +485,8 @@ static void cast_vertical_zlight_segment(
                 }
 
                 bool started_span = false;
-                for( delta.x() = 0; delta.x() <= distance; delta.x()++ ) {
+                for( delta.x() = first_leading_edge_at( this_span->start_minor, distance * 2 - 1 );
+                     delta.x() <= distance; delta.x()++ ) {
                     current.x() = offset.x() + delta.x() * x_transform;
                     current.z() = offset.z() + delta.z() * z_transform;
                     // See comment above trailing_edge_major and leading_edge_major in above function.
@@ -475,7 +532,7 @@ static void cast_vertical_zlight_segment(
                     }
 
                     const int dist = rl_dist( tripoint_rel_ms::zero, delta ) + offset_distance;
-                    last_intensity = calc( numerator, this_span->cumulative_value, dist );
+                    last_intensity = intensities.get( this_span->cumulative_value, dist );
 
                     if( !floor_block ) {
                         ( *output_caches[z_index] )[current.x()][current.y()] =
