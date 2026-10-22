@@ -344,6 +344,8 @@ struct body_part_type {
         bool was_loaded = false;
 
         bool has_flag( const json_character_flag &flag ) const;
+        // False when no body part type lists flag, plain or conditional
+        static bool any_may_have_flag( const json_character_flag &flag );
         bp_type primary_limb_type() const;
         bool has_type( const bp_type &type ) const;
 

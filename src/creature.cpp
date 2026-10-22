@@ -649,7 +649,8 @@ bool Creature::sees( const map &here, const Creature &critter ) const
 
     // Check means to detect invisibility here
     // The target's flags are cheap and rarely set, so check them before the observer's.
-    if( ( critter.has_flag( mon_flag_CAMOUFLAGE ) || critter.has_effect_with_flag( json_flag_INVISIBLE ) ||
+    if( ( critter.has_flag( mon_flag_CAMOUFLAGE ) ||
+          critter.has_effect_with_flag( json_flag_INVISIBLE ) ||
           critter.has_flag( mon_flag_NIGHT_INVISIBILITY ) ||
           critter.has_flag( mon_flag_PERMANENT_INVISIBILITY ) ) &&
         ( has_flag( json_flag_TRUE_SEEING ) || has_flag( mon_flag_TRUESIGHT ) ) ) {
@@ -2141,11 +2142,25 @@ bool Creature::has_effect( const efftype_id &eff_id ) const
     return has_effect( eff_id, bodypart_str_id::NULL_ID() );
 }
 
+// The type of the effects stored under one id. Their own pointer to it saves
+// looking the id up in the table of all effect types.
+static const effect_type &type_of_entry(
+    const std::pair<const efftype_id, std::map<bodypart_id, effect>> &entry )
+{
+    if( !entry.second.empty() ) {
+        const effect_type *type = entry.second.begin()->second.get_effect_type();
+        if( type != nullptr ) {
+            return *type;
+        }
+    }
+    return entry.first.obj();
+}
+
 bool Creature::has_effect_with_flag( const flag_id &flag, const bodypart_id &bp ) const
 {
     return std::any_of( effects->begin(), effects->end(), [&]( const auto & elem ) {
         // effect::has_flag currently delegates to effect_type::has_flag
-        return elem.first->has_flag( flag ) && elem.second.count( bp );
+        return type_of_entry( elem ).has_flag( flag ) && elem.second.count( bp );
     } );
 }
 
@@ -2153,7 +2168,7 @@ bool Creature::has_effect_with_flag( const flag_id &flag ) const
 {
     return std::any_of( effects->begin(), effects->end(), [&]( const auto & elem ) {
         // effect::has_flag currently delegates to effect_type::has_flag
-        return elem.first->has_flag( flag );
+        return type_of_entry( elem ).has_flag( flag );
     } );
 }
 
@@ -2162,7 +2177,7 @@ std::vector<std::reference_wrapper<const effect>> Creature::get_effects_with_fla
 {
     std::vector<std::reference_wrapper<const effect>> effs;
     for( auto &elem : *effects ) {
-        if( !elem.first->has_flag( flag ) ) {
+        if( !type_of_entry( elem ).has_flag( flag ) ) {
             continue;
         }
         for( const std::pair<const bodypart_id, effect> &_it : elem.second ) {

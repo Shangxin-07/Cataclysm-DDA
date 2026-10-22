@@ -47,6 +47,7 @@
 #include "scent_map.h"
 #include "sounds.h"
 #include "string_formatter.h"
+#include "submap.h"
 #include "tileray.h"
 #include "translations.h"
 #include "trap.h"
@@ -157,9 +158,7 @@ static bool z_is_valid( int z )
 
 bool monster::will_move_to( map *here, const tripoint_bub_ms &p ) const
 {
-    const std::vector<field_type_id> impassable_field_ids =
-        here->get_impassable_field_type_ids_at( p );
-
+    std::vector<field_type_id> impassable_field_ids;
     for( const std::pair<const int_id<field_type>, field_entry> &pair :
          here->field_at( p ) ) {
         const field_type_id &fid = pair.first;
@@ -167,36 +166,46 @@ bool monster::will_move_to( map *here, const tripoint_bub_ms &p ) const
         if( ft.block_mtypes.count( type->id ) > 0 ) {
             return false;
         }
+        if( pair.second.get_intensity_level().move_cost < 0 ) {
+            impassable_field_ids.emplace_back( fid );
+        }
     }
 
-    if( here->has_flag( ter_furn_flag::TFLAG_MON_AVOID_STRICT, p ) ) {
+    // the tile's terrain and furniture, read once for the flag checks below
+    const bool in_bounds = here->inbounds( p );
+    const const_maptile tile = static_cast<const map *>( here )->maptile_at( p );
+    const ter_t &tile_ter = tile.get_ter_t();
+    const furn_t &tile_furn = tile.get_furn_t();
+    const auto tile_has = [&]( const ter_furn_flag flag ) {
+        return in_bounds && ( tile_ter.has_flag( flag ) || tile_furn.has_flag( flag ) );
+    };
+
+    if( tile_has( ter_furn_flag::TFLAG_MON_AVOID_STRICT ) ) {
         return false;
     }
 
     if( !here->passable_skip_fields( p ) ||
-        here->has_flag( ter_furn_flag::TFLAG_CLIMBABLE, p ) ||
+        tile_has( ter_furn_flag::TFLAG_CLIMBABLE ) ||
         ( !impassable_field_ids.empty() &&
           !is_immune_fields( impassable_field_ids ) ) ) {
         if( digging() ) {
-            if( !here->has_flag( ter_furn_flag::TFLAG_BURROWABLE, p ) ) {
+            if( !tile_has( ter_furn_flag::TFLAG_BURROWABLE ) ) {
                 return false;
             }
         } else if( !( can_climb() &&
-                      here->has_flag( ter_furn_flag::TFLAG_CLIMBABLE, p ) ) ) {
+                      tile_has( ter_furn_flag::TFLAG_CLIMBABLE ) ) ) {
             return false;
         }
     }
 
-    if( !here->has_vehicle_floor( p ) ) {
-        if( !can_submerge() && !flies() &&
-            here->has_flag( ter_furn_flag::TFLAG_DEEP_WATER, p ) ) {
-            return false;
-        }
+    if( !can_submerge() && !flies() && tile_has( ter_furn_flag::TFLAG_DEEP_WATER ) &&
+        !here->has_vehicle_floor( p ) ) {
+        return false;
     }
 
     // digging monster can ONLY move underground?
-    if( digs() && !here->has_flag( ter_furn_flag::TFLAG_DIGGABLE, p ) &&
-        !here->has_flag( ter_furn_flag::TFLAG_BURROWABLE, p ) ) {
+    if( digs() && !tile_has( ter_furn_flag::TFLAG_DIGGABLE ) &&
+        !tile_has( ter_furn_flag::TFLAG_BURROWABLE ) ) {
         return false;
     }
     // one dimensional creatures can ONLY move in their home dimension
