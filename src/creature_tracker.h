@@ -132,6 +132,8 @@ class creature_tracker
         void invalidate_reachability_cache() {
             dirty_ = true;
         }
+        // Moves a creature that changed faction to its new group in its reachable zone.
+        void faction_changed( Creature &critter, const mfaction_id &old_faction );
 
     private:
         /** Remove the monsters entry in @ref monsters_by_location */

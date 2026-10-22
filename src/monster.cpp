@@ -3802,9 +3802,10 @@ void monster::make_ally( const monster &z )
 void monster::set_faction( const mfaction_id &new_faction )
 {
     if( faction != new_faction ) {
+        const mfaction_id old_faction = faction;
         faction = new_faction;
         // creatures in each reachable zone are grouped by faction
-        get_creature_tracker().invalidate_reachability_cache();
+        get_creature_tracker().faction_changed( *this, old_faction );
     }
 }
 
