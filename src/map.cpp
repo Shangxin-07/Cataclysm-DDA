@@ -3080,8 +3080,13 @@ bool map::has_floor( const tripoint_bub_ms &p ) const
     if( !inbounds( p ) ) {
         return true;
     }
-    return !has_flag( ter_furn_flag::TFLAG_NO_FLOOR, p ) &&
-           !has_flag( ter_furn_flag::TFLAG_NO_FLOOR_WATER, p );
+    const const_maptile tile = maptile_at_internal( p );
+    const ter_t &t = tile.get_ter_t();
+    const furn_t &f = tile.get_furn_t();
+    return !t.has_flag( ter_furn_flag::TFLAG_NO_FLOOR ) &&
+           !f.has_flag( ter_furn_flag::TFLAG_NO_FLOOR ) &&
+           !t.has_flag( ter_furn_flag::TFLAG_NO_FLOOR_WATER ) &&
+           !f.has_flag( ter_furn_flag::TFLAG_NO_FLOOR_WATER );
 }
 
 bool map::has_floor_or_water( const tripoint_bub_ms &p ) const
@@ -3122,8 +3127,9 @@ bool map::has_floor_or_support( const tripoint_bub_ms &p ) const
 
 bool map::has_vehicle_floor( const tripoint_bub_ms &p ) const
 {
-    return veh_at( p ).part_with_feature( "BOARDABLE", false ) ||
-           veh_at( p ).part_with_feature( "OBSTACLE", false );
+    const optional_vpart_position vp = veh_at( p );
+    return vp.part_with_feature( "BOARDABLE", false ) ||
+           vp.part_with_feature( "OBSTACLE", false );
 }
 
 void map::drop_everything( const tripoint_bub_ms &p )

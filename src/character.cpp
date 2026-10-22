@@ -7507,6 +7507,9 @@ int Character::count_bionic_with_flag( const json_character_flag &flag ) const
 
 bool Character::has_bodypart_with_flag( const json_character_flag &flag ) const
 {
+    if( !body_part_type::any_may_have_flag( flag ) ) {
+        return false;
+    }
     for( const std::pair<const bodypart_str_id, bodypart> &elem : get_body() ) {
         if( elem.first->has_flag( flag ) ) {
             return true;
@@ -7534,6 +7537,9 @@ bool Character::has_bodypart_with_flag( const json_character_flag &flag ) const
 
 int Character::count_bodypart_with_flag( const json_character_flag &flag ) const
 {
+    if( !body_part_type::any_may_have_flag( flag ) ) {
+        return 0;
+    }
     int ret = 0;
     for( const bodypart_id &bp : get_all_body_parts() ) {
         if( bp->has_flag( flag ) ) {

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <functional>
 #include <limits>
+#include <memory>
 
 #include "bodypart.h"
 #include "character.h"
@@ -17,6 +18,7 @@
 #include "messages.h"
 #include "move_mode.h"
 #include "output.h"
+#include "pimpl.h"
 #include "string_formatter.h"
 
 static const character_modifier_id
@@ -255,7 +257,15 @@ float Character::get_limb_score( const limb_score_id &score, const bp_type &bp,
                                             override_wounds ) * id.first->limbtypes.at( bp );
         }
         if( cache_flag_EFFECT_LIMB_SCORE_MOD_LOCAL ) {
-            for( const effect &local : get_effects_from_bp( id.first ) ) {
+            // the effects get_effects_from_bp would list, in its order, without
+            // building the list for every limb
+            const bodypart_id part( id.first );
+            for( const auto &entry : *effects ) {
+                const auto on_part = entry.second.find( part );
+                if( on_part == entry.second.end() ) {
+                    continue;
+                }
+                const effect &local = on_part->second;
                 float local_mul = 1.0f;
                 // Second filter to only apply the local effects at this step (non-local modifiers are already calulated)
                 if( local.has_flag( flag_EFFECT_LIMB_SCORE_MOD_LOCAL ) ) {

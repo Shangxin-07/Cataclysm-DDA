@@ -526,14 +526,36 @@ void bp_qualities_provided::load( const JsonObject &jo )
               0.f );
 }
 
+namespace
+{
+// every flag any body part type lists, plain or conditional; built on first use
+cata::flat_set<json_character_flag> flags_on_any_bodypart;
+bool flags_on_any_bodypart_built = false;
+} // namespace
+
+bool body_part_type::any_may_have_flag( const json_character_flag &flag )
+{
+    if( !flags_on_any_bodypart_built ) {
+        flags_on_any_bodypart.clear();
+        for( const body_part_type &bp : get_all() ) {
+            flags_on_any_bodypart.insert( bp.flags.begin(), bp.flags.end() );
+            flags_on_any_bodypart.insert( bp.conditional_flags.begin(), bp.conditional_flags.end() );
+        }
+        flags_on_any_bodypart_built = true;
+    }
+    return flags_on_any_bodypart.count( flag ) > 0;
+}
+
 void body_part_type::reset()
 {
     body_part_factory.reset();
+    flags_on_any_bodypart_built = false;
 }
 
 void body_part_type::finalize_all()
 {
     body_part_factory.finalize();
+    flags_on_any_bodypart_built = false;
 }
 
 void body_part_type::finalize()
@@ -1079,12 +1101,17 @@ float bodypart::get_limb_score( const Creature &mon, const limb_score_id &score,
                                 int override_encumb,
                                 int override_wounds ) const
 {
+    float sc = id->get_limb_score( score );
+    // wounds, encumbrance and skill only scale the score, so a limb without it
+    // scores zero; the hp check keeps the wound step's 0/0 case as it was
+    if( sc == 0.0f && get_hp_max() != 0 ) {
+        return 0.0f;
+    }
     bool process_wounds = override_wounds == 1 || ( override_wounds == -1 &&
                           score->affected_by_wounds() );
     bool process_encumb = override_encumb == 1 || ( override_encumb == -1 &&
                           score->affected_by_encumb() );
 
-    float sc = id->get_limb_score( score );
     if( process_wounds ) {
         sc = wound_adjusted_limb_value( sc, score );
     }
