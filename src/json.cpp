@@ -2366,15 +2366,26 @@ void JsonOut::write( std::string_view val )
         write_separator();
     }
     stream->put( '"' );
-    for( const char &i : val ) {
-        unsigned char ch = i;
+    // Copy runs of characters that need no escaping in one write; put() per
+    // character goes through a stream sentry each time.
+    const char *run_start = val.data();
+    const char *const end = val.data() + val.size();
+    const auto flush_run = [&]( const char *run_end ) {
+        if( run_end != run_start ) {
+            stream->write( run_start, run_end - run_start );
+        }
+    };
+    for( const char *p = val.data(); p != end; ++p ) {
+        const unsigned char ch = *p;
+        if( ch >= 0x20 && ch != '"' && ch != '\\' ) {
+            continue;
+        }
+        flush_run( p );
+        run_start = p + 1;
         if( ch == '"' ) {
             stream->write( "\\\"", 2 );
         } else if( ch == '\\' ) {
             stream->write( "\\\\", 2 );
-        } else if( ch == '/' ) {
-            // don't technically need to escape this
-            stream->put( '/' );
         } else if( ch == '\b' ) {
             stream->write( "\\b", 2 );
         } else if( ch == '\f' ) {
@@ -2385,7 +2396,7 @@ void JsonOut::write( std::string_view val )
             stream->write( "\\r", 2 );
         } else if( ch == '\t' ) {
             stream->write( "\\t", 2 );
-        } else if( ch < 0x20 ) {
+        } else {
             // convert to "\uxxxx" unicode escape
             stream->write( "\\u00", 4 );
             stream->put( ( ch < 0x10 ) ? '0' : '1' );
@@ -2395,10 +2406,9 @@ void JsonOut::write( std::string_view val )
             } else {
                 stream->put( 'A' + ( remainder - 0x0A ) );
             }
-        } else {
-            stream->put( ch );
         }
     }
+    flush_run( end );
     stream->put( '"' );
     need_separator = true;
 }

@@ -1,6 +1,8 @@
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <memory>
 #include <ratio>
 #include <string>
@@ -8,6 +10,7 @@
 #include "avatar.h"
 #include "calendar.h"
 #include "cata_catch.h"
+#include "cata_path.h"
 #include "character_id.h"
 #include "coordinates.h"
 #include "creature.h"
@@ -18,6 +21,7 @@
 #include "monster.h"
 #include "npc.h"
 #include "overmapbuffer.h"
+#include "path_info.h"
 #include "player_helpers.h"
 #include "point.h"
 #include "rng.h"
@@ -38,6 +42,7 @@ static const trait_id trait_DEBUG_NOTEMP( "DEBUG_NOTEMP" );
 // Whole-turn throughput on a real generated city, for profiling.
 // Run with: tests/cata_test "[turn_benchmark]"
 // Tune with env BENCH_TURNS, BENCH_MONSTERS, BENCH_NPCS, BENCH_SEED.
+// BENCH_SAVES=N also times N full saves after the turns.
 static int env_int( const char *name, int fallback )
 {
     const char *v = std::getenv( name );
@@ -137,4 +142,25 @@ TEST_CASE( "turn_throughput_city", "[.][turn_benchmark]" )
                  std::chrono::duration<double, std::milli>( t_load1 - t_load0 ).count(),
                  placed, g->num_creatures() - 1, npcs_placed, turns, ms, ms / turns );
     turn_profiler::report( stdout );
+
+    const int saves = env_int( "BENCH_SAVES", 0 );
+    for( int i = 0; i < saves; ++i ) {
+        const std::chrono::steady_clock::time_point s0 = std::chrono::steady_clock::now();
+        REQUIRE( g->save() );
+        const std::chrono::steady_clock::time_point s1 = std::chrono::steady_clock::now();
+        std::printf( "save_benchmark: save %d took %.1f ms\n", i,
+                     std::chrono::duration<double, std::milli>( s1 - s0 ).count() );
+        u.set_moves( 0 );
+        g->do_turn();
+    }
+    if( saves > 0 ) {
+        std::uintmax_t bytes = 0;
+        for( const std::filesystem::directory_entry &e : std::filesystem::recursive_directory_iterator(
+                 PATH_INFO::world_base_save_path().get_unrelative_path() ) ) {
+            if( e.is_regular_file() ) {
+                bytes += e.file_size();
+            }
+        }
+        std::printf( "save_benchmark: world is %.1f KiB on disk\n", bytes / 1024.0 );
+    }
 }
