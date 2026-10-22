@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <bitset>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <ostream>
