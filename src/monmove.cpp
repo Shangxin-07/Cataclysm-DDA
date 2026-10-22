@@ -32,6 +32,7 @@
 #include "map_iterator.h"
 #include "map_scale_constants.h"
 #include "mapdata.h"
+#include "maptile_fwd.h"
 #include "mattack_common.h"
 #include "messages.h"
 #include "monfaction.h"

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <functional>
 #include <limits>
+#include <memory>
 
 #include "bodypart.h"
 #include "character.h"
@@ -17,6 +18,7 @@
 #include "messages.h"
 #include "move_mode.h"
 #include "output.h"
+#include "pimpl.h"
 #include "string_formatter.h"
 
 static const character_modifier_id
