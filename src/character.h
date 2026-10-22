@@ -1155,6 +1155,9 @@ class Character : public Creature, public visitable
          * to simulate glare, etc, night vision only works if you are in the dark.
          */
         float get_vision_threshold( float light_level ) const;
+    private:
+        float calc_vision_threshold( float light_level ) const;
+    public:
         /**
          * Flag encumbrance for updating.
         */

@@ -2501,7 +2501,56 @@ static float threshold_for_range( float range )
     return LIGHT_AMBIENT_MINIMAL / std::exp( range * LIGHT_TRANSPARENCY_OPEN_AIR ) - epsilon;
 }
 
+namespace
+{
+// Remembers one character's vision threshold while a sight check runs. Every input of
+// get_vision_threshold (stats, gear, limbs, effects) stays fixed during a const sight
+// check, so the same light level always gives the same threshold there.
+struct vision_threshold_memo_slot {
+    const Character *owner = nullptr;
+    bool valid = false;
+    float light_level = 0.0f;
+    float threshold = 0.0f;
+};
+vision_threshold_memo_slot vision_threshold_memo;
+
+class vision_threshold_memo_scope
+{
+    public:
+        explicit vision_threshold_memo_scope( const Character &who ) :
+            active( vision_threshold_memo.owner != & who ), saved( vision_threshold_memo ) {
+            if( active ) {
+                vision_threshold_memo = vision_threshold_memo_slot{ &who };
+            }
+        }
+        ~vision_threshold_memo_scope() {
+            if( active ) {
+                vision_threshold_memo = saved;
+            }
+        }
+        vision_threshold_memo_scope( const vision_threshold_memo_scope & ) = delete;
+        vision_threshold_memo_scope &operator=( const vision_threshold_memo_scope & ) = delete;
+    private:
+        bool active;
+        vision_threshold_memo_slot saved;
+};
+} // namespace
+
 float Character::get_vision_threshold( float light_level ) const
+{
+    vision_threshold_memo_slot &memo = vision_threshold_memo;
+    if( memo.owner != this ) {
+        return calc_vision_threshold( light_level );
+    }
+    if( !memo.valid || memo.light_level != light_level ) {
+        memo.threshold = calc_vision_threshold( light_level );
+        memo.light_level = light_level;
+        memo.valid = true;
+    }
+    return memo.threshold;
+}
+
+float Character::calc_vision_threshold( float light_level ) const
 {
     if( vision_mode_cache[DEBUG_NIGHTVISION] ) {
         // Debug vision always works with absurdly little light.
@@ -6436,6 +6485,7 @@ bool Character::is_visible_in_range( const Creature &critter, const int range ) 
 std::vector<Creature *> Character::get_visible_creatures( const int range ) const
 {
     const map &here = get_map();
+    const vision_threshold_memo_scope memo( *this );
 
     return g->get_creatures_if( [this, range, &here]( const Creature & critter ) -> bool {
         return this != &critter && pos_abs() != critter.pos_abs() &&
@@ -6504,6 +6554,7 @@ int Character::get_mutation_visibility_cap( const Character *observed ) const
 std::vector<Creature *> Character::get_hostile_creatures( int range ) const
 {
     const map &here = get_map();
+    const vision_threshold_memo_scope memo( *this );
 
     return g->get_creatures_if( [this, range, &here]( const Creature & critter ) -> bool {
         // Fixes circular distance range for ranged attacks
@@ -7274,6 +7325,7 @@ npc_attitude Character::get_attitude() const
 bool Character::sees( const map &here, const tripoint_bub_ms &t, bool is_avatar,
                       int range_mod ) const
 {
+    const vision_threshold_memo_scope memo( *this );
     const int wanted_range = rl_dist( pos_bub( here ), t );
     bool can_see = this->is_avatar() ? here.pl_sees( t, std::min( sight_max, wanted_range ) ) :
                    Creature::sees( here, t, is_avatar, range_mod );
@@ -7287,6 +7339,7 @@ bool Character::sees( const map &here, const tripoint_bub_ms &t, bool is_avatar,
 
 bool Character::sees( const map &here, const Creature &critter ) const
 {
+    const vision_threshold_memo_scope memo( *this );
     // This handles only the player/npc specific stuff (monsters don't have traits or bionics).
     const int dist = rl_dist( pos_abs(), critter.pos_abs() );
     if( std::abs( posz() - critter.posz() ) > fov_3d_z_range ) {
