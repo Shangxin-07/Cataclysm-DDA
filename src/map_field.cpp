@@ -1019,12 +1019,20 @@ void field_processor_fd_fire( const tripoint_bub_ms &p, field_entry &cur, field_
             // `item::burn` modifies the charges in order to simulate some of them getting
             // destroyed by the fire, this changes the item weight, but may not actually
             // destroy it. We need to spawn products anyway.
-            const units::mass old_weight = fuel->weight( false );
+            // Burning only changes an item's own weight through its charges or its corpse
+            // type, so skip weighing everything else (piles of loose items are common).
+            const bool weight_may_change = fuel->count_by_charges() || fuel->is_corpse();
+            units::mass old_weight = weight_may_change ? fuel->weight( false ) : 0_gram;
             bool destroyed = fuel->burn( frd );
             // If the item is considered destroyed, it may have negative charge count,
             // see `item::burn?. This in turn means `item::weight` returns a negative value,
             // which we can not use, so only call `weight` when it's still an existing item.
-            const units::mass new_weight = destroyed ? 0_gram : fuel->weight( false );
+            units::mass new_weight = 0_gram;
+            if( weight_may_change ) {
+                new_weight = destroyed ? 0_gram : fuel->weight( false );
+            } else if( destroyed ) {
+                old_weight = fuel->weight( false );
+            }
             if( old_weight != new_weight ) {
                 here.create_burnproducts( p, *fuel, old_weight - new_weight );
             }
