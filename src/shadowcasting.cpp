@@ -83,6 +83,8 @@ struct span {
  * Handle splitting the current span in cast_horizontal_zlight_segment and
  * cast_vertical_zlight_segment to avoid as much code duplication as possible
  */
+namespace
+{
 /**
  * calc's results for one cumulative value at each distance, since the tiles of a span
  * share that value and most of them share a distance with a neighbour.
@@ -117,6 +119,7 @@ class intensity_memo
         std::array<unsigned, max_distance> filled_ = {};
         std::array<T, max_distance> values_ = {};
 };
+} // namespace
 
 template<typename T, bool( *is_transparent )( const T &, const T & ), T( *accumulate )( const T &, const T &, const int & )>
 static void split_span( cata::list<span<T>> &spans,
