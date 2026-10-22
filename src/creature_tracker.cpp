@@ -3,16 +3,18 @@
 #include <algorithm>
 #include <array>
 #include <bitset>
+#include <initializer_list>
 #include <limits>
+#include <memory>
 #include <ostream>
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "avatar.h"
 #include "cata_assert.h"
 #include "debug.h"
-#include "flood_fill.h"
 #include "game.h"
 #include "map.h"
 #include "map_scale_constants.h"
@@ -344,6 +346,252 @@ T *creature_tracker::creature_at( const tripoint_abs_ms &p, bool allow_hallucina
     return nullptr;
 }
 
+namespace
+{
+
+using zone_row = std::bitset<MAPSIZE_X>;
+using zone_level = std::array<zone_row, MAPSIZE_Y>;
+
+// Which tiles of the reality bubble one creature zone covers. Creatures see and move
+// through the same tiles in long runs (open sky above the city is most of a zone), so
+// this works on whole rows of tiles at once and only asks the map about a tile when
+// the zone first touches it.
+class zone_fill
+{
+    public:
+        void reset( map &here ) {
+            here_ = &here;
+            for( zone_level &level : reached_ ) {
+                for( zone_row &row : level ) {
+                    row.reset();
+                }
+            }
+            for( std::bitset<MAPSIZE_Y> &known : open_known_ ) {
+                known.reset();
+            }
+            for( std::bitset<MAPSIZE_Y> &queued : queued_ ) {
+                queued.reset();
+            }
+            work_.clear();
+            vertical_.clear();
+            for( std::array<zone_level, OVERMAP_LAYERS> &tried : tried_ ) {
+                for( zone_level &level : tried ) {
+                    for( zone_row &row : level ) {
+                        row.reset();
+                    }
+                }
+            }
+        }
+
+        void fill_from( const tripoint_bub_ms &start );
+
+        bool reached( const tripoint_bub_ms &p ) const {
+            return p.x() >= 0 && p.x() < MAPSIZE_X && p.y() >= 0 && p.y() < MAPSIZE_Y &&
+                   p.z() >= -OVERMAP_DEPTH && p.z() <= OVERMAP_HEIGHT &&
+                   reached_[p.z() + OVERMAP_DEPTH][p.y()][p.x()];
+        }
+
+    private:
+        // Tiles a creature can see or move through, ignoring fields.
+        const zone_row &open_row( int z, int y );
+        // Whether a creature can get into this tile from the level below or above.
+        bool enters_from_below( const tripoint_bub_ms &p ) const;
+        bool enters_from_above( const tripoint_bub_ms &p ) const;
+        bool passable_down( const tripoint_bub_ms &p, const maptile &mt, const ter_t &ter ) const;
+        void reach( int z, int y, const zone_row &add );
+        // Spreads through each level from the queued rows.
+        void fill_rows();
+        // Takes one step to another level, returning whether it found a way.
+        bool step_vertical();
+
+        map *here_ = nullptr;
+        std::array<zone_level, OVERMAP_LAYERS> reached_;
+        std::array<zone_level, OVERMAP_LAYERS> open_;
+        std::array<std::bitset<MAPSIZE_Y>, OVERMAP_LAYERS> open_known_;
+        std::array<std::bitset<MAPSIZE_Y>, OVERMAP_LAYERS> queued_;
+        // Tiles already asked whether they lead up (0) or down (1).
+        std::array<std::array<zone_level, OVERMAP_LAYERS>, 2> tried_;
+        std::vector<point> work_;
+        // Rows to look for holes and stairs in, as (y, z).
+        std::vector<point> vertical_;
+};
+
+const zone_row &zone_fill::open_row( int z, int y )
+{
+    const int zi = z + OVERMAP_DEPTH;
+    zone_row &row = open_[zi][y];
+    if( !open_known_[zi][y] ) {
+        open_known_[zi].set( y );
+        row.reset();
+        for( int x = 0; x < MAPSIZE_X; ++x ) {
+            const tripoint_bub_ms p( x, y, z );
+            if( here_->inbounds( p ) && ( here_->is_transparent_wo_fields( p ) || here_->passable( p ) ) ) {
+                row.set( x );
+            }
+        }
+    }
+    return row;
+}
+
+bool zone_fill::passable_down( const tripoint_bub_ms &p, const maptile &mt,
+                               const ter_t &ter ) const
+{
+    // Only holes and stairs connect levels, so check that first.
+    return ( ter.has_flag( ter_furn_flag::TFLAG_NO_FLOOR ) ||
+             ter.has_flag( ter_furn_flag::TFLAG_GOES_DOWN ) ) &&
+           ( ( ter.movecost != 0 && mt.get_furn_t().movecost >= 0 ) ||
+             here_->is_transparent_wo_fields( p ) );
+}
+
+bool zone_fill::enters_from_below( const tripoint_bub_ms &p ) const
+{
+    const maptile &up = here_->maptile_at( p );
+    const ter_t &up_ter = up.get_ter_t();
+    return !up_ter.id.is_null() && passable_down( p, up, up_ter );
+}
+
+bool zone_fill::enters_from_above( const tripoint_bub_ms &p ) const
+{
+    // The hole is in the tile above, but the furniture checked is the one below it.
+    const maptile &up = here_->maptile_at( p + tripoint::above );
+    const ter_t &up_ter = up.get_ter_t();
+    return !up_ter.id.is_null() && passable_down( p, here_->maptile_at( p ), up_ter );
+}
+
+void zone_fill::reach( int z, int y, const zone_row &add )
+{
+    const int zi = z + OVERMAP_DEPTH;
+    reached_[zi][y] |= add;
+    if( !queued_[zi][y] ) {
+        queued_[zi].set( y );
+        work_.emplace_back( y, z );
+    }
+}
+
+void zone_fill::fill_from( const tripoint_bub_ms &start )
+{
+    if( !reached( start ) && start.x() >= 0 && start.x() < MAPSIZE_X && start.y() >= 0 &&
+        start.y() < MAPSIZE_Y && start.z() >= -OVERMAP_DEPTH && start.z() <= OVERMAP_HEIGHT &&
+        open_row( start.z(), start.y() )[start.x()] ) {
+        zone_row seed;
+        seed.set( start.x() );
+        reach( start.z(), start.y(), seed );
+    }
+    do {
+        fill_rows();
+    } while( step_vertical() );
+}
+
+void zone_fill::fill_rows()
+{
+    while( !work_.empty() ) {
+        const point zy = work_.back();
+        work_.pop_back();
+        const int y = zy.x;
+        const int z = zy.y;
+        const int zi = z + OVERMAP_DEPTH;
+        queued_[zi].reset( y );
+
+        // Spread along the row to the ends of each open run.
+        const zone_row &open = open_row( z, y );
+        zone_row &row = reached_[zi][y];
+        if( open.all() ) {
+            row = open;
+        } else {
+            zone_row prev;
+            do {
+                prev = row;
+                row = ( row | row << 1 | row >> 1 ) & open;
+            } while( row != prev );
+        }
+        const zone_row spread = row | row << 1 | row >> 1;
+        for( const int y2 : {
+                 y - 1, y + 1
+             } ) {
+            if( y2 < 0 || y2 >= MAPSIZE_Y ) {
+                continue;
+            }
+            const zone_row add = spread & open_row( z, y2 ) & ~reached_[zi][y2];
+            if( add.any() ) {
+                reach( z, y2, add );
+            }
+        }
+        // Holes and stairs lead to the levels above and below. Look for them once this
+        // level is filled, as by then most of the tiles they lead to are already reached.
+        vertical_.emplace_back( y, z );
+    }
+}
+
+bool zone_fill::step_vertical()
+{
+    while( !vertical_.empty() ) {
+        const point zy = vertical_.back();
+        const int y = zy.x;
+        const int z = zy.y;
+        const zone_row &row = reached_[z + OVERMAP_DEPTH][y];
+        for( const int dz : {
+                 1, -1
+             } ) {
+            const int z2 = z + dz;
+            if( dz > 0 ? z2 >= OVERMAP_HEIGHT : z2 < -OVERMAP_DEPTH ) {
+                continue;
+            }
+            zone_row &tried = tried_[dz > 0 ? 0 : 1][z2 + OVERMAP_DEPTH][y];
+            const zone_row candidates = row & ~reached_[z2 + OVERMAP_DEPTH][y] & ~tried;
+            if( candidates.none() ) {
+                continue;
+            }
+            const zone_row &open2 = open_row( z2, y );
+            for( int x = 0; x < MAPSIZE_X; ++x ) {
+                if( !candidates[x] ) {
+                    continue;
+                }
+                tried.set( x );
+                const tripoint_bub_ms p( x, y, z2 );
+                if( open2[x] && ( dz > 0 ? enters_from_below( p ) : enters_from_above( p ) ) ) {
+                    // Fill from here before trying the rest of this row.
+                    zone_row add;
+                    add.set( x );
+                    reach( z2, y, add );
+                    return true;
+                }
+            }
+        }
+        vertical_.pop_back();
+    }
+    return false;
+}
+
+} // namespace
+
+void creature_tracker::faction_changed( Creature &critter, const mfaction_id &old_faction )
+{
+    if( dirty_ ) {
+        return;
+    }
+    const auto zone_iter = creatures_by_zone_and_faction_.find( critter.get_reachable_zone() );
+    if( zone_iter == creatures_by_zone_and_faction_.end() ) {
+        // Not grouped yet; its zone will be filled before anyone looks it up.
+        return;
+    }
+    const auto old_iter = zone_iter->second.find( old_faction );
+    if( old_iter != zone_iter->second.end() ) {
+        std::vector<shared_ptr_fast<Creature>> &group = old_iter->second;
+        const auto it = std::find_if( group.begin(), group.end(),
+        [&critter]( const shared_ptr_fast<Creature> &ptr ) {
+            return ptr.get() == &critter;
+        } );
+        if( it != group.end() ) {
+            shared_ptr_fast<Creature> ptr = std::move( *it );
+            group.erase( it );
+            zone_iter->second[critter.get_monster_faction()].emplace_back( std::move( ptr ) );
+            return;
+        }
+    }
+    // The zone does not list it under its old faction, so rebuild the zones to be safe.
+    invalidate_reachability_cache();
+}
+
 /** This is lazily evaluated on demand. Each creature in a zone is visited
  * as it flood fills, then the zone number is incremented. At the end all creatures in
  * the same zone will have the same zone number assigned, which can be used to have creatures in
@@ -370,68 +618,32 @@ void creature_tracker::flood_fill_zone( const Creature &origin )
 
     map &here = get_map();
 
-    // Most filled tiles are empty; mark the occupied ones up front so the
-    // visitor below only does the creature lookup where there is a creature.
-    std::array<std::array<std::bitset<MAPSIZE_Y>, MAPSIZE_X>, OVERMAP_LAYERS> occupied;
-    const auto mark_occupied = [&here, &occupied]( const tripoint_abs_ms & abs ) {
+    static std::unique_ptr<zone_fill> fill = std::make_unique<zone_fill>();
+    fill->reset( here );
+    fill->fill_from( origin.pos_bub() );
+
+    // Visit the creatures in the zone in a fixed order.
+    std::vector<tripoint_bub_ms> spots;
+    spots.reserve( monsters_by_location.size() + active_npc.size() + 1 );
+    const auto add_spot = [&here, &spots]( const tripoint_abs_ms & abs ) {
         const tripoint_bub_ms p = here.get_bub( abs );
         if( here.inbounds( p ) ) {
-            occupied[p.z() + OVERMAP_DEPTH][p.x()].set( p.y() );
+            spots.push_back( p );
         }
     };
     for( const std::pair<const tripoint_abs_ms, shared_ptr_fast<monster>> &mon :
          monsters_by_location ) {
-        mark_occupied( mon.first );
+        add_spot( mon.first );
     }
     for( const shared_ptr_fast<npc> &guy : active_npc ) {
-        mark_occupied( guy->pos_abs() );
+        add_spot( guy->pos_abs() );
     }
-    mark_occupied( get_avatar().pos_abs() );
-
-    ff::flood_fill_visit_10_connected( origin.pos_bub(),
-    [&here]( const tripoint_bub_ms & loc, int direction ) {
-        if( direction == 0 ) {
-            return here.inbounds( loc ) && ( here.is_transparent_wo_fields( loc ) ||
-                                             here.passable( loc ) );
-        }
-
-        auto check_location_passable_down = [loc, &here]( const maptile & mt, const ter_t & ter ) {
-            return ( ( ter.movecost != 0 && mt.get_furn_t().movecost >= 0 ) ||
-                     here.is_transparent_wo_fields( loc ) ) &&
-                   ( ter.has_flag( ter_furn_flag::TFLAG_NO_FLOOR ) ||
-                     ter.has_flag( ter_furn_flag::TFLAG_GOES_DOWN ) );
-        };
-
-        if( direction == 1 ) {
-            const maptile &up = here.maptile_at( loc );
-            const ter_t &up_ter = up.get_ter_t();
-            if( up_ter.id.is_null() ) {
-                return false;
-            }
-            if( check_location_passable_down( up, up_ter ) ) {
-                return true;
-            }
-        }
-        if( direction == -1 ) {
-            const maptile &up = here.maptile_at( loc + tripoint::above );
-            const ter_t &up_ter = up.get_ter_t();
-            if( up_ter.id.is_null() ) {
-                return false;
-            }
-            const maptile &down = here.maptile_at( loc );
-            const ter_t &down_ter = up.get_ter_t();
-            if( down_ter.id.is_null() ) {
-                return false;
-            }
-            if( check_location_passable_down( down, down_ter ) ) {
-                return true;
-            }
-        }
-        return false;
-    },
-    [this, &occupied]( const tripoint_bub_ms & loc ) {
-        if( !occupied[loc.z() + OVERMAP_DEPTH][loc.x()][loc.y()] ) {
-            return;
+    add_spot( get_avatar().pos_abs() );
+    std::sort( spots.begin(), spots.end() );
+    spots.erase( std::unique( spots.begin(), spots.end() ), spots.end() );
+    for( const tripoint_bub_ms &loc : spots ) {
+        if( !fill->reached( loc ) ) {
+            continue;
         }
         if( Creature *creature = this->creature_at<Creature>( loc, true ) ) {
             if( shared_ptr_fast<Creature> ptr = g->shared_from( *creature ) ) {
@@ -440,7 +652,7 @@ void creature_tracker::flood_fill_zone( const Creature &origin )
                 creature->set_reachable_zone( n );
             }
         }
-    } );
+    }
     if( zone_number_ == std::numeric_limits<int>::max() ) {
         zone_number_ = 1;
     } else {
