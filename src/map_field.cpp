@@ -3,6 +3,8 @@
 #include <bitset>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <list>
 #include <map>
@@ -2191,13 +2193,46 @@ void map::propagate_field( const tripoint_bub_ms &center, const field_type_id &t
 {
     using gas_blast = std::pair<float, tripoint_bub_ms>;
     std::priority_queue<gas_blast, std::vector<gas_blast>, pair_greater_cmp_first> open;
-    std::set<tripoint_bub_ms> closed;
     open.emplace( 0.0f, center );
+
+    // Tiles near the center are tracked in a flat grid; tiles further out fall back to a set.
+    // Every spread step uses up at least one unit of amount, so the field never gets further
+    // than amount tiles from the center and small emissions only need a small grid.
+    // Only closed tiles get new fields, so a tile's passability can't change while the field
+    // spreads and is looked up once per tile instead of once per neighbor.
+    enum class tile_mark : uint8_t { unseen, open, closed };
+    constexpr int max_mark_radius = 24;
+    constexpr int max_mark_side = max_mark_radius * 2 + 1;
+    constexpr int max_mark_cells = max_mark_side * max_mark_side;
+    const int mark_radius = std::clamp( amount, 0, max_mark_radius );
+    const int mark_side = mark_radius * 2 + 1;
+    std::array<tile_mark, max_mark_cells> marks;
+    std::fill_n( marks.begin(), mark_side * mark_side, tile_mark::unseen );
+    std::set<tripoint_bub_ms> far_closed;
+    const auto mark_at = [&]( const tripoint_bub_ms & p ) -> tile_mark * {
+        const tripoint_rel_ms d = p - center;
+        if( std::abs( d.x() ) > mark_radius || std::abs( d.y() ) > mark_radius )
+        {
+            return nullptr;
+        }
+        return &marks[( d.y() + mark_radius ) * mark_side + d.x() + mark_radius];
+    };
+    const auto is_closed = [&]( const tripoint_bub_ms & p ) {
+        const tile_mark *m = mark_at( p );
+        return m ? *m == tile_mark::closed : far_closed.count( p ) > 0;
+    };
+    const auto close = [&]( const tripoint_bub_ms & p ) {
+        if( tile_mark *m = mark_at( p ) ) {
+            *m = tile_mark::closed;
+        } else {
+            far_closed.insert( p );
+        }
+    };
 
     const bool not_gas = type.obj().phase != phase_id::GAS;
 
     while( amount > 0 && !open.empty() ) {
-        if( closed.count( open.top().second ) ) {
+        if( is_closed( open.top().second ) ) {
             open.pop();
             continue;
         }
@@ -2208,7 +2243,7 @@ void map::propagate_field( const tripoint_bub_ms &center, const field_type_id &t
         const int cur_intensity = get_field_intensity( open.top().second, type );
         open.pop();
         while( !open.empty() && get_field_intensity( open.top().second, type ) == cur_intensity ) {
-            if( closed.count( open.top().second ) == 0 ) {
+            if( !is_closed( open.top().second ) ) {
                 gas_front.push_back( open.top() );
             }
 
@@ -2219,7 +2254,7 @@ void map::propagate_field( const tripoint_bub_ms &center, const field_type_id &t
 
         while( !gas_front.empty() ) {
             gas_blast gp = random_entry_removed( gas_front );
-            closed.insert( gp.second );
+            close( gp.second );
             const int cur_intensity = get_field_intensity( gp.second, type );
             if( cur_intensity < max_intensity ) {
                 const int bonus = std::min( max_intensity - cur_intensity, increment );
@@ -2237,13 +2272,19 @@ void map::propagate_field( const tripoint_bub_ms &center, const field_type_id &t
             static const std::array<int, 8> y_offset = { {  0, 0, -1, 1, -1,  1, -1, 1  } };
             for( size_t i = 0; i < 8; i++ ) {
                 tripoint_bub_ms pt = gp.second + point( x_offset[i], y_offset[i] );
-                if( closed.count( pt ) > 0 ) {
+                tile_mark *m = mark_at( pt );
+                if( m ? *m == tile_mark::closed : far_closed.count( pt ) > 0 ) {
                     continue;
                 }
 
-                if( impassable( pt ) && ( not_gas || !has_flag( ter_furn_flag::TFLAG_PERMEABLE, pt ) ) ) {
-                    closed.insert( pt );
-                    continue;
+                if( !m || *m == tile_mark::unseen ) {
+                    if( impassable( pt ) && ( not_gas || !has_flag( ter_furn_flag::TFLAG_PERMEABLE, pt ) ) ) {
+                        close( pt );
+                        continue;
+                    }
+                    if( m ) {
+                        *m = tile_mark::open;
+                    }
                 }
 
                 open.emplace( static_cast<float>( rl_dist( center, pt ) ), pt );
