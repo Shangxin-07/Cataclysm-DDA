@@ -136,7 +136,8 @@
     "material": [ "dense_powder_nonflam" ],
     "volume": "2 ml",
     "weight": "3460 mg",
-    "//": "Density: 1.73g/cm3"
+    "//": "Density: 1.73g/cm3",
+    "stackable": true
   },
   {
     "type": "ITEM",
@@ -198,7 +199,8 @@
     "description": "Portland is most likely long gone, but its memory persists in cement.  This ubiquitous binder can be used for all kinds of advanced masonry.  Just add water.",
     "material": [ "cement" ],
     "volume": "5 ml",
-    "weight": "7200 mg"
+    "weight": "7200 mg",
+    "stackable": true
   },
   {
     "type": "ITEM",
@@ -214,7 +216,8 @@
     "//": "density: 1.6 g/cm3",
     "volume": "5 ml",
     "weight": "8 g",
-    "melee_damage": { "bash": 1 }
+    "melee_damage": { "bash": 1 },
+    "stackable": true
   },
   {
     "type": "ITEM",
@@ -257,7 +260,8 @@
     "description": "The product of burning limestone, this white powder is a crucial ingredient in making cement.  That said, it is also extremely caustic and will cause severe burns to any tissue it comes in contact with.  This property could probably be exploited.",
     "material": [ "quicklime" ],
     "volume": "5 ml",
-    "weight": "16700 mg"
+    "weight": "16700 mg",
+    "stackable": true
   },
   {
     "type": "ITEM",
@@ -286,7 +290,8 @@
     "description": "A handful of New England sand.  If you had a stoked furnace, you could turn it into glass.  Otherwise, it's only good for making cement.",
     "material": [ "sand" ],
     "volume": "5 ml",
-    "weight": "8 g"
+    "weight": "8 g",
+    "stackable": true
   },
   {
     "type": "ITEM",
@@ -667,7 +672,8 @@
     "material": [ "dense_powder" ],
     "volume": "1 ml",
     "weight": "5606 mg",
-    "//": "Density: 5.606 g/cm3"
+    "//": "Density: 5.606 g/cm3",
+    "stackable": true
   },
   {
     "type": "ITEM",
@@ -906,7 +912,8 @@
     "material": [ "dense_powder" ],
     "volume": "1 ml",
     "weight": "2710 mg",
-    "//": "density: 2.71 g/cm3"
+    "//": "density: 2.71 g/cm3",
+    "stackable": true
   },
   {
     "type": "ITEM",
@@ -1022,7 +1029,8 @@
     "material": [ "powder_nonflam" ],
     "display_type": "BY_WEIGHT",
     "volume": "50 ml",
-    "weight": "5275 mg"
+    "weight": "5275 mg",
+    "stackable": true
   },
   {
     "type": "ITEM",
@@ -1523,7 +1531,8 @@
     "description": "The burnt remains of a person or animal.",
     "material": [ "powder_nonflam" ],
     "volume": "10 ml",
-    "weight": "10 g"
+    "weight": "10 g",
+    "stackable": true
   },
   {
     "type": "ITEM",
