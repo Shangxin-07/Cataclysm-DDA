@@ -2,13 +2,13 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <ratio>
 #include <string>
 #include <string_view>
 
 #include "cata_catch.h"
 #include "coordinates.h"
 #include "map_scale_constants.h"
-#include "omdata.h"
 #include "overmapbuffer.h"
 #include "point.h"
 #include "rng.h"
