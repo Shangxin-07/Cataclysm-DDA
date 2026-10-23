@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <string_view>
 
 #include "cata_catch.h"
 #include "coordinates.h"
@@ -24,7 +25,7 @@ static int env_int( const char *name, int fallback )
     return v ? static_cast<int>( std::strtol( v, nullptr, 10 ) ) : fallback;
 }
 
-static void fingerprint_add( uint64_t &h, const std::string &s )
+static void fingerprint_add( uint64_t &h, std::string_view s )
 {
     for( const char c : s ) {
         h = ( h ^ static_cast<unsigned char>( c ) ) * 1099511628211ULL;

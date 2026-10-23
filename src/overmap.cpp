@@ -3055,12 +3055,10 @@ bool overmap::can_place_special( const overmap_special &special, const tripoint_
                 const point_abs_omt om_base = coords::project_to<coords::omt>( om->pos() );
                 const point_rel_omt l = lo - om_base;
                 const point_rel_omt h = hi - om_base;
-                const int x0 = std::max( l.x(), 0 );
-                const int y0 = std::max( l.y(), 0 );
-                const int x1 = std::min( h.x(), OMAPX - 1 );
-                const int y1 = std::min( h.y(), OMAPY - 1 );
-                for( int x = x0; x <= x1; ++x ) {
-                    for( int y = y0; y <= y1; ++y ) {
+                const point start( std::max( l.x(), 0 ), std::max( l.y(), 0 ) );
+                const point end( std::min( h.x(), OMAPX - 1 ), std::min( h.y(), OMAPY - 1 ) );
+                for( int x = start.x; x <= end.x; ++x ) {
+                    for( int y = start.y; y <= end.y; ++y ) {
                         if( !bits->test( y * OMAPX + x ) ) {
                             continue;
                         }

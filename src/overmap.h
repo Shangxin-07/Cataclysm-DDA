@@ -444,12 +444,12 @@ struct std::hash<pos_dir<Tripoint>> {
 class overmap
 {
     public:
-        overmap( const overmap & ) = default;
+        overmap( const overmap & ) = delete;
         overmap( overmap && ) = default;
         explicit overmap( const point_abs_om &p );
         ~overmap();
 
-        overmap &operator=( const overmap & ) = default;
+        overmap &operator=( const overmap & ) = delete;
 
         /**
          * Create content in the overmap.
