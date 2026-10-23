@@ -212,6 +212,13 @@ struct enum_traits<om_vision_level> {
     static constexpr om_vision_level last = om_vision_level::last;
 };
 
+// Where overmap::save() last wrote some data, and a hash of that data.
+struct overmap_saved_file {
+    std::string path;
+    size_t hash = 0;
+    size_t size = 0;
+};
+
 struct map_layer {
     cata::mdarray<oter_id, point_om_omt> terrain;
     cata::mdarray<om_vision_level, point_om_omt> visible;
@@ -219,6 +226,8 @@ struct map_layer {
     // Allocated on the first write that differs from the default placeholder; until then
     // every entry of the layer reads as that placeholder (see overmap::map_cache_at).
     std::unique_ptr<cata::mdarray<std::shared_ptr<map_data_summary>, point_om_omt>> map_cache;
+    // How many map_cache entries hold real (non-placeholder) data.
+    int real_map_data = 0;
     std::vector<om_note> notes;
     std::vector<om_map_extra> extras;
 };
@@ -694,6 +703,10 @@ class overmap
         std::array<std::unique_ptr<std::bitset<OMAPX *OMAPY>>, OVERMAP_LAYERS>
                 safe_at_worldgen_bits; // NOLINT(cata-serialize)
         void add_safe_at_worldgen( const tripoint_om_omt &p );
+
+        // What save() last wrote to each file, so an unchanged overmap is not written again.
+        mutable std::optional<overmap_saved_file> last_saved_view; // NOLINT(cata-serialize)
+        mutable std::optional<overmap_saved_file> last_saved_terrain; // NOLINT(cata-serialize)
 
         // For oter_ts with the requires_predecessor flag, we need to store the
         // predecessor terrains so they can be used for mapgen later

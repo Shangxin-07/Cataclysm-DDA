@@ -63,6 +63,7 @@ mapbuffer::~mapbuffer() = default;
 void mapbuffer::clear()
 {
     submaps.clear();
+    saved_quads.clear();
 }
 
 void mapbuffer::clear_outside_reality_bubble()
@@ -244,26 +245,15 @@ void mapbuffer::save_quad(
     offsets.push_back( point_rel_sm::south_east );
 
     bool all_uniform = true;
-    bool reverted_to_uniform = false;
-    bool file_exists = false;
+    bool any_reverted_uniform = false;
 
-    std::optional<zzip> z;
+    const bool compressed = world_generator->active_world->has_compression_enabled();
     cata_path zzip_name = dirname;
     zzip_name += zzip_suffix;
-    // The number of uniform submaps is so enormous that the filesystem overhead
-    // for this step of just checking if the quad exists approaches 70% of the
-    // total cost of saving the mapbuffer, in one test save I had.
-    if( world_generator->active_world->has_compression_enabled() ) {
-        z = zzip::load( zzip_name.get_unrelative_path(),
-                        ( PATH_INFO::world_base_save_path() / "maps.dict" ).get_unrelative_path() );
-        if( !z ) {
-            throw std::runtime_error( "Failed opening compressed save file " +
-                                      zzip_name.get_unrelative_path().generic_u8string() );
-        }
-        file_exists = z->has_file( filename.get_relative_path().filename() );
-    } else {
-        file_exists = std::filesystem::exists( filename.get_unrelative_path() );
-    }
+    // Identifies this quad's saved data in saved_quads.
+    const std::string saved_key = compressed ?
+                                  zzip_name.generic_u8string() + '/' + filename.get_relative_path().filename().generic_u8string() :
+                                  filename.generic_u8string();
 
     for( point_rel_sm &offsets_offset : offsets ) {
         tripoint_abs_sm submap_addr = project_to<coords::sm>( om_addr );
@@ -274,9 +264,35 @@ void mapbuffer::save_quad(
             if( !sm->is_uniform() ) {
                 all_uniform = false;
             } else if( sm->reverted ) {
-                reverted_to_uniform = file_exists;
+                any_reverted_uniform = true;
             }
         }
+    }
+
+    // A reverted uniform quad needs its old file removed, so only then does it matter
+    // whether that file exists.
+    std::optional<zzip> z;
+    bool file_exists = false;
+    const auto open_save_file = [&]() {
+        // The number of uniform submaps is so enormous that the filesystem overhead
+        // for this step of just checking if the quad exists approaches 70% of the
+        // total cost of saving the mapbuffer, in one test save I had.
+        if( compressed ) {
+            z = zzip::load( zzip_name.get_unrelative_path(),
+                            ( PATH_INFO::world_base_save_path() / "maps.dict" ).get_unrelative_path() );
+            if( !z ) {
+                throw std::runtime_error( "Failed opening compressed save file " +
+                                          zzip_name.get_unrelative_path().generic_u8string() );
+            }
+            file_exists = z->has_file( filename.get_relative_path().filename() );
+        } else {
+            file_exists = std::filesystem::exists( filename.get_unrelative_path() );
+        }
+    };
+    bool reverted_to_uniform = false;
+    if( all_uniform && any_reverted_uniform ) {
+        open_save_file();
+        reverted_to_uniform = file_exists;
     }
 
     if( all_uniform ) {
@@ -334,6 +350,19 @@ void mapbuffer::save_quad(
 
     std::string s = std::move( stringout ).str();
 
+    if( !reverted_to_uniform ) {
+        // Skip rewriting a quad whose file already holds exactly this data.
+        const size_t hash = std::hash<std::string> {}( s );
+        const auto saved = saved_quads.find( saved_key );
+        if( saved != saved_quads.end() && saved->second.first == hash &&
+            saved->second.second == s.size() &&
+            file_exist( compressed ? zzip_name : filename ) ) {
+            return;
+        }
+        open_save_file();
+        saved_quads[saved_key] = { hash, s.size() };
+    }
+
     if( z ) {
         z->add_file( filename.get_relative_path().filename(), s );
     } else {
@@ -350,6 +379,7 @@ void mapbuffer::save_quad(
         } else {
             std::filesystem::remove( filename.get_unrelative_path() );
         }
+        saved_quads.erase( saved_key );
     }
     if( z ) {
         cata_path tmp_path = zzip_name + ".tmp";
