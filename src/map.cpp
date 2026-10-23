@@ -10942,9 +10942,11 @@ void map::build_scene_caches()
     const int minz = zlevels ? -OVERMAP_DEPTH : abs_sub.z();
     const int maxz = zlevels ? OVERMAP_HEIGHT : abs_sub.z();
     for( int z = minz; z <= maxz; z++ ) {
+        // Dirty-marking does not allocate a level's cache, so create it before the
+        // builders, which skip levels that have none.
+        level_cache &ch = get_cache( z );
         build_outside_cache( z );
         build_floor_cache( z );
-        level_cache &ch = get_cache( z );
         if( ch.vehicle_opaque_any ) {
             ch.vehicle_opaque_cache.fill( false );
             ch.vehicle_opaque_any = false;
