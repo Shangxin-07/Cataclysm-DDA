@@ -545,7 +545,7 @@ void fingerprint_add( std::string_view text )
     loaded_data_fingerprint *= 1099511628211ULL;
 }
 
-void fingerprint_add_file( const std::string &src, const cata_path &file )
+void fingerprint_add_file( std::string_view src, const cata_path &file )
 {
     const std::filesystem::path p = file.get_unrelative_path();
     std::error_code ec;
