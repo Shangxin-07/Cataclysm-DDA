@@ -171,7 +171,9 @@ class field
         /**
          * Returns field type that should be drawn.
          */
-        field_type_id displayed_field_type() const;
+        field_type_id displayed_field_type() const {
+            return _displayed_field_type;
+        }
 
         /**
          * Returns the intensity of the drawn tile

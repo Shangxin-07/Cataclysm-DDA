@@ -7568,12 +7568,12 @@ bool map::add_field( const tripoint_bub_ms &p, const field_type_id &type_id, int
     }
 
     // Don't spawn non-gaseous fields on open air
-    if( has_flag( ter_furn_flag::TFLAG_NO_FLOOR, p ) && type_id.obj().phase != phase_id::GAS ) {
+    if( type_id.obj().phase != phase_id::GAS && has_flag( ter_furn_flag::TFLAG_NO_FLOOR, p ) ) {
         return false;
     }
 
     // Don't spawn liquid fields on water tiles
-    if( has_flag( ter_furn_flag::TFLAG_SWIMMABLE, p ) && type_id.obj().phase == phase_id::LIQUID ) {
+    if( type_id.obj().phase == phase_id::LIQUID && has_flag( ter_furn_flag::TFLAG_SWIMMABLE, p ) ) {
         return false;
     }
 
