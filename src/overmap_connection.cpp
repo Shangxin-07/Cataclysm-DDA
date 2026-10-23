@@ -93,9 +93,18 @@ const overmap_connection::subtype *overmap_connection::pick_subtype_for(
 
 bool overmap_connection::has( const int_id<oter_t> &oter ) const
 {
-    return std::find_if( subtypes.cbegin(), subtypes.cend(), [&oter]( const subtype & elem ) {
+    const size_t cache_index = oter.to_i();
+    if( cache_index < cached_subtypes.size() && cached_subtypes[cache_index].has >= 0 ) {
+        return cached_subtypes[cache_index].has != 0;
+    }
+    const bool result = std::find_if( subtypes.cbegin(), subtypes.cend(),
+    [&oter]( const subtype & elem ) {
         return oter->type_is( elem.terrain );
     } ) != subtypes.cend();
+    if( cache_index < cached_subtypes.size() ) {
+        cached_subtypes[cache_index].has = result ? 1 : 0;
+    }
+    return result;
 }
 
 void overmap_connection::load( const JsonObject &jo, std::string_view )

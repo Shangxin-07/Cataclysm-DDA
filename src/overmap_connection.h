@@ -2,6 +2,7 @@
 #ifndef CATA_SRC_OVERMAP_CONNECTION_H
 #define CATA_SRC_OVERMAP_CONNECTION_H
 
+#include <cstdint>
 #include <list>
 #include <set>
 #include <string>
@@ -65,6 +66,8 @@ class overmap_connection
         struct cache {
             const subtype *value = nullptr;
             bool assigned = false;
+            // has() for this terrain: -1 not computed yet, else 0 or 1.
+            int8_t has = -1;
             explicit operator bool() const {
                 return assigned;
             }
