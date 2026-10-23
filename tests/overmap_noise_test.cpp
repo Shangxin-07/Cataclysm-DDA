@@ -1,3 +1,4 @@
+#include <initializer_list>
 #include <string>
 
 #include "cata_catch.h"
