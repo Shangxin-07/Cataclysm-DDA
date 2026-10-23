@@ -506,6 +506,7 @@ void recipe::load( const JsonObject &jo, const std::string_view src )
     bp_autocalc = false;
     check_blueprint_needs = false;
     bp_build_reqs.reset();
+    bp_build_reqs_pending = false;
 
     if( type == "recipe" ) {
 
@@ -868,14 +869,14 @@ static void finalize_nested_recipes( recipe &r )
 
 void recipe::finalize()
 {
-    if( bp_autocalc ) {
-        bp_build_reqs = calculate_all_blueprint_reqs( blueprint, bp_parameter_names );
-    } else if( test_mode && check_blueprint_needs ) {
-        check_blueprint_requirements();
-    }
-
     if( !blueprint.is_empty() ) {
-        incorporate_build_reqs();
+        // Working out blueprint requirements runs the blueprint's mapgen for every parameter
+        // combination, which is a large share of load time. Only camp building needs them,
+        // so outside tests they are worked out on first use.
+        bp_build_reqs_pending = true;
+        if( test_mode ) {
+            finalize_blueprint_reqs();
+        }
     } else if( has_steps() ) {
         // Step recipes: merge root using + root components + per-step tools/qualities
         add_requirements( reqs_external );  // root using
@@ -2067,15 +2068,29 @@ const std::vector<std::pair<std::string, int>>  &recipe::blueprint_excludes() co
     return bp_excludes;
 }
 
+void recipe::finalize_blueprint_reqs() const
+{
+    bp_build_reqs_pending = false;
+    if( bp_autocalc ) {
+        bp_build_reqs = calculate_all_blueprint_reqs( blueprint, bp_parameter_names );
+    } else if( test_mode && check_blueprint_needs ) {
+        check_blueprint_requirements();
+    }
+    incorporate_build_reqs();
+}
+
 const parameterized_build_reqs &recipe::blueprint_build_reqs() const
 {
+    if( bp_build_reqs_pending ) {
+        finalize_blueprint_reqs();
+    }
     if( !bp_build_reqs ) {
         cata_fatal( "Accessing absent blueprint_build_reqs in recipe %s", ident().str() );
     }
     return *bp_build_reqs;
 }
 
-void recipe::check_blueprint_requirements()
+void recipe::check_blueprint_requirements() const
 {
     build_reqs total_reqs =
         get_build_reqs_for_furn_ter_ids( get_changed_ids_from_update( blueprint, {} ) );
@@ -2188,7 +2203,7 @@ int recipe::makes_amount() const
     return makes * result_mult;
 }
 
-void recipe::incorporate_build_reqs()
+void recipe::incorporate_build_reqs() const
 {
     if( !bp_build_reqs ) {
         bp_build_reqs = cata::make_value<parameterized_build_reqs>();

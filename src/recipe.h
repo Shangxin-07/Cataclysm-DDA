@@ -453,7 +453,7 @@ class recipe
          * specified in JSON.  If there's any inconsistency, it issues a debug message.
          * This is only used in unit tests so as to speed up data loading in gameplay.
          */
-        void check_blueprint_requirements();
+        void check_blueprint_requirements() const;
 
         bool hot_result() const;
 
@@ -463,7 +463,9 @@ class recipe
         int makes_amount() const;
 
     private:
-        void incorporate_build_reqs();
+        void incorporate_build_reqs() const;
+        // Works out bp_build_reqs; deferred from finalize() until first use outside tests.
+        void finalize_blueprint_reqs() const;
         void add_requirements( const std::vector<std::pair<requirement_id, int>> &reqs );
         void finalize_step_proficiencies();
 
@@ -547,7 +549,8 @@ class recipe
          * requirements into the standard recipe requirements. */
         bool bp_autocalc = false;
         bool check_blueprint_needs = false;
-        cata::value_ptr<parameterized_build_reqs> bp_build_reqs;
+        mutable cata::value_ptr<parameterized_build_reqs> bp_build_reqs;
+        mutable bool bp_build_reqs_pending = false;
 };
 
 // ---------- Tool speed modifiers ----------
