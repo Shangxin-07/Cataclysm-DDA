@@ -1,6 +1,7 @@
 #include "init.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -52,7 +53,6 @@
 #include "faction_camp.h"
 #include "fault.h"
 #include "field_type.h"
-#include "mapgen_post_process.h"
 #include "filesystem.h"
 #include "flag.h"
 #include "flexbuffer_json.h"
@@ -77,6 +77,7 @@
 #include "map_extras.h"
 #include "mapdata.h"
 #include "mapgen.h"
+#include "mapgen_post_process.h"
 #include "martialarts.h"
 #include "material.h"
 #include "math_parser_jmath.h"
