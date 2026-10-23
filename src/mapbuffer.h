@@ -2,6 +2,7 @@
 #ifndef CATA_SRC_MAPBUFFER_H
 #define CATA_SRC_MAPBUFFER_H
 
+#include <stddef.h>
 #include <list>
 #include <map>
 #include <memory>

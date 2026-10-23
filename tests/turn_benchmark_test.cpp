@@ -1,12 +1,15 @@
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <ratio>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "avatar.h"
 #include "calendar.h"
