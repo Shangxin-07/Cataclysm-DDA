@@ -2080,7 +2080,7 @@ bool overmap::omt_lake_noise_threshold( const point_abs_omt &origin, const point
     if( !inbounds ) {
         return false;
     }
-    return noise_func.noise_at( offset ) > noise_threshold;
+    return noise_func.noise_exceeds( offset, noise_threshold );
 }
 
 bool overmap::guess_has_lake( const point_abs_om &p, const double noise_threshold,
