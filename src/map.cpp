@@ -402,7 +402,10 @@ std::unique_ptr<level_cache, map::level_cache_free> map::alloc_cache()
 void map::set_transparency_cache_dirty( const int zlev )
 {
     if( inbounds_z( zlev ) ) {
-        get_cache( zlev ).transparency_cache_dirty.set();
+        // A new cache starts fully dirty, so an absent one needs no allocation here.
+        if( level_cache *cache = get_cache_lazy( zlev ) ) {
+            cache->transparency_cache_dirty.set();
+        }
         scene_build_pending = true;
         set_lightmap_cache_dirty_below( zlev );
         bump_geometry_revision( zlev );
@@ -413,7 +416,9 @@ void map::set_transparency_cache_dirty( const tripoint_bub_ms &p, bool field )
 {
     if( inbounds( p ) ) {
         const tripoint_bub_sm smp = coords::project_to<coords::sm>( p );
-        get_cache( smp.z() ).transparency_cache_dirty.set( smp.x() * MAPSIZE + smp.y() );
+        if( level_cache *cache = get_cache_lazy( smp.z() ) ) {
+            cache->transparency_cache_dirty.set( smp.x() * MAPSIZE + smp.y() );
+        }
         scene_build_pending = true;
         set_lightmap_cache_dirty_below( smp.z() );
         if( !field ) {
@@ -447,7 +452,9 @@ void map::set_seen_cache_dirty( const int zlevel )
 void map::set_outside_cache_dirty( const int zlev )
 {
     if( inbounds_z( zlev ) ) {
-        get_cache( zlev ).outside_cache_dirty = true;
+        if( level_cache *cache = get_cache_lazy( zlev ) ) {
+            cache->outside_cache_dirty = true;
+        }
         scene_build_pending = true;
         set_lightmap_cache_dirty_below( zlev );
     }
@@ -473,8 +480,12 @@ bool map::cast_reached( const tripoint_bub_ms &p ) const
 void map::bump_geometry_revision( const int zlev )
 {
     if( inbounds_z( zlev ) ) {
-        get_cache( zlev ).geometry_revision = next_cache_generation();
-        last_scene_change = get_cache( zlev ).geometry_revision;
+        // A cache allocated later gets a fresh geometry_revision of its own.
+        const uint64_t revision = next_cache_generation();
+        if( level_cache *cache = get_cache_lazy( zlev ) ) {
+            cache->geometry_revision = revision;
+        }
+        last_scene_change = revision;
     }
 }
 
@@ -488,8 +499,12 @@ void map::set_lightmap_cache_dirty( const int zlev )
 void map::set_lightmap_cache_dirty_below( const int zlev )
 {
     for( int z = zlev; z >= -OVERMAP_DEPTH; z-- ) {
+        // A level without a cache yet gets one with lightmap_dirty already set, so
+        // there is no need to allocate and clear it here.
         if( inbounds_z( z ) ) {
-            get_cache( z ).lightmap_dirty = true;
+            if( level_cache *cache = get_cache_lazy( z ) ) {
+                cache->lightmap_dirty = true;
+            }
         }
     }
 }

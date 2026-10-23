@@ -76,6 +76,12 @@ class om_noise_layer_lake : public om_noise_layer
         }
 
         float noise_at( const point_om_omt &local_omt_pos ) const override;
+
+        /**
+         * Same result as `noise_at( local_omt_pos ) > threshold`, but stops summing octaves
+         * once the remaining ones cannot change the answer.
+         */
+        bool noise_exceeds( const point_om_omt &local_omt_pos, double threshold ) const;
 };
 
 
