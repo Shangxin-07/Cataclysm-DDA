@@ -310,6 +310,7 @@ oter_id overmap::get_default_terrain( int z ) const
 // underlying bitset default constructs to all 0.
 static map_data_summary impassable_omt{};
 static map_data_summary passable_omt{ ~impassable_omt.passable, true };
+static const std::shared_ptr<map_data_summary> default_map_cache_entry{ std::shared_ptr<void>(), &passable_omt };
 
 void overmap::init_layers()
 {
@@ -319,8 +320,7 @@ void overmap::init_layers()
         l.terrain.fill( tid );
         l.visible.fill( om_vision_level::unseen );
         l.explored.fill( false );
-        // Verify this isn't copying!
-        l.map_cache.fill( std::shared_ptr<map_data_summary> { std::shared_ptr<void>(), &passable_omt } );
+        l.map_cache.reset();
     }
 }
 
@@ -791,8 +791,8 @@ bool overmap::passable( const tripoint_om_ms &p )
     point_om_omt omt_origin;
     tripoint_omt_ms index;
     std::tie( omt_origin, index ) = project_remain<coords::omt>( p );
-    std::shared_ptr<map_data_summary> &ptr = layer[index.z() +
-            OVERMAP_DEPTH].map_cache[omt_origin];
+    const std::shared_ptr<map_data_summary> &ptr = map_cache_at( tripoint_om_omt( omt_origin,
+            index.z() ) );
     if( !ptr ) {
         // Oh no we aren't populated???
         // Promote to error later.
@@ -806,8 +806,7 @@ bool overmap::passable( const tripoint_om_ms &p )
 
 std::shared_ptr<map_data_summary> overmap::get_omt_summary( const tripoint_om_omt &p )
 {
-    std::shared_ptr<map_data_summary> &ptr = layer[p.z() +
-            OVERMAP_DEPTH].map_cache[p.xy()];
+    const std::shared_ptr<map_data_summary> &ptr = map_cache_at( p );
     if( !ptr ) {
         // Oh no we aren't populated???
         // Promote to error later.
@@ -821,8 +820,8 @@ void overmap::set_passable( const tripoint_om_ms &p, bool new_passable )
     point_om_omt omt_origin;
     tripoint_omt_ms index;
     std::tie( omt_origin, index ) = project_remain<coords::omt>( p );
-    std::shared_ptr<map_data_summary> &ptr = layer[index.z() +
-            OVERMAP_DEPTH].map_cache[omt_origin];
+    const tripoint_om_omt omt( omt_origin, index.z() );
+    const std::shared_ptr<map_data_summary> &ptr = map_cache_at( omt );
     if( !ptr ) {
         // Oh no we aren't populated???
         // Promote to error later.
@@ -830,9 +829,28 @@ void overmap::set_passable( const tripoint_om_ms &p, bool new_passable )
     }
     if( ptr->placeholder ) {
         // Copy the placeholder data.
-        ptr = std::make_shared<map_data_summary>( ptr->passable );
+        map_cache_set( omt, std::make_shared<map_data_summary>( ptr->passable ) );
     }
-    ptr->passable[index.y() * 24 + index.x()] = new_passable;
+    map_cache_at( omt )->passable[index.y() * 24 + index.x()] = new_passable;
+}
+
+const std::shared_ptr<map_data_summary> &overmap::map_cache_at( const tripoint_om_omt &p ) const
+{
+    const map_layer &l = layer[p.z() + OVERMAP_DEPTH];
+    return l.map_cache ? ( *l.map_cache )[p.xy()] : default_map_cache_entry;
+}
+
+void overmap::map_cache_set( const tripoint_om_omt &p, std::shared_ptr<map_data_summary> value )
+{
+    map_layer &l = layer[p.z() + OVERMAP_DEPTH];
+    if( !l.map_cache ) {
+        if( value.get() == default_map_cache_entry.get() ) {
+            return;
+        }
+        l.map_cache = std::make_unique<cata::mdarray<std::shared_ptr<map_data_summary>, point_om_omt>>();
+        l.map_cache->fill( default_map_cache_entry );
+    }
+    ( *l.map_cache )[p.xy()] = std::move( value );
 }
 
 // For internal use only, just overwrite the pointer.
@@ -845,7 +863,7 @@ void overmap::set_passable( const tripoint_abs_omt &p,
     if( overmap_coord != loc ) {
         return;
     }
-    layer[omt_coord.z() + OVERMAP_DEPTH].map_cache[omt_coord.xy()] = std::move( new_passable );
+    map_cache_set( omt_coord, std::move( new_passable ) );
 }
 
 void overmap::set_passable( const tripoint_abs_omt &p,
@@ -857,13 +875,11 @@ void overmap::set_passable( const tripoint_abs_omt &p,
     if( overmap_coord != loc ) {
         return;
     }
-    std::shared_ptr<map_data_summary> &ptr = layer[omt_coord.z() +
-            OVERMAP_DEPTH].map_cache[omt_coord.xy()];
     // overmap pinky promises to never write to this map_data_summary.
     // This is enforced by all writes to map_cache[] checking for placeholder == true.
     // If so, we CoW to a new map_data_summary then edit that.
-    ptr = std::const_pointer_cast<map_data_summary>( map_data_placeholders::get_ptr(
-                new_passable ) );
+    map_cache_set( omt_coord, std::const_pointer_cast<map_data_summary>
+                   ( map_data_placeholders::get_ptr( new_passable ) ) );
 }
 
 void overmap::set_passable( const tripoint_abs_omt &p, const std::bitset<24 * 24> &new_passable )
@@ -874,14 +890,12 @@ void overmap::set_passable( const tripoint_abs_omt &p, const std::bitset<24 * 24
     if( overmap_coord != loc ) {
         return;
     }
-    std::shared_ptr<map_data_summary> &ptr = layer[omt_coord.z() +
-            OVERMAP_DEPTH].map_cache[omt_coord.xy()];
-    if( !ptr ) {
+    if( !map_cache_at( omt_coord ) ) {
         // Oh no we aren't populated???
         // Promote to error later.
         return;
     }
-    ptr = std::make_shared<map_data_summary>( new_passable );
+    map_cache_set( omt_coord, std::make_shared<map_data_summary>( new_passable ) );
 }
 
 bool overmap::inbounds( const tripoint_abs_ms &p )
@@ -1319,6 +1333,7 @@ void overmap::clear_mon_groups()
 void overmap::clear_overmap_special_placements()
 {
     overmap_special_placements.clear();
+    special_placement_counts.clear();
 }
 
 void overmap::clear_connections_out()
@@ -2958,10 +2973,36 @@ void overmap::log_unique_special( const overmap_special_id &id )
 
 bool overmap::contains_unique_special( const overmap_special_id &id ) const
 {
-    return std::find_if( overmap_special_placements.begin(),
-    overmap_special_placements.end(), [&id]( const auto & it ) {
-        return it.second == id;
-    } ) != overmap_special_placements.end();
+    return special_placement_counts.count( id ) != 0;
+}
+
+void overmap::set_special_placement( const tripoint_om_omt &p, const overmap_special_id &id )
+{
+    const auto [it, inserted] = overmap_special_placements.try_emplace( p, id );
+    if( !inserted ) {
+        if( it->second == id ) {
+            return;
+        }
+        const auto old = special_placement_counts.find( it->second );
+        if( --old->second == 0 ) {
+            special_placement_counts.erase( old );
+        }
+        it->second = id;
+    }
+    ++special_placement_counts[id];
+}
+
+void overmap::add_safe_at_worldgen( const tripoint_om_omt &p )
+{
+    safe_at_worldgen.emplace( p );
+    if( !inbounds( p ) ) {
+        return;
+    }
+    std::unique_ptr<std::bitset<OMAPX *OMAPY>> &bits = safe_at_worldgen_bits[p.z() + OVERMAP_DEPTH];
+    if( !bits ) {
+        bits = std::make_unique<std::bitset<OMAPX *OMAPY>>();
+    }
+    bits->set( p.y() * OMAPX + p.x() );
 }
 
 bool overmap::can_place_special( const overmap_special &special, const tripoint_om_omt &p,
@@ -2989,16 +3030,45 @@ bool overmap::can_place_special( const overmap_special &special, const tripoint_
     // We're using the maximum radius rather than the generated one, as the latter hasn't been
     // produced yet, and it also provides some extra breathing room margin in most cases.
     const overmap_special_spawns &spawns = special.get_monster_spawns();
-    if( spawns.group ) {
+    if( spawns.group && spawns.radius.max >= 0 ) {
+        // Every placement of a SAFE_AT_WORLDGEN special is recorded in its overmap's
+        // safe_at_worldgen_bits, so only those tiles can block. Visit each existing
+        // overmap the square window overlaps and test its marked tiles, confirming
+        // each with the placement map.
+        const int r = spawns.radius.max;
         const point_abs_omt base = coords::project_to<coords::omt>( this->pos() );
-        for( int x = p.x() - spawns.radius.max; x <= p.x() + spawns.radius.max; x++ ) {
-            for( int y = p.y() - spawns.radius.max; y <= p.y() + spawns.radius.max; y++ ) {
-                const tripoint_abs_omt target = tripoint_abs_omt{ base, p.z() } + point_rel_omt{ x, y };
-                if( overmap_buffer.get_existing( coords::project_to<coords::om>( target.xy() ) ) ) {
-                    const std::optional<overmap_special_id> spec = overmap_buffer.overmap_special_at( target );
-                    if( spec.has_value() &&
-                        spec.value().obj().has_flag( "SAFE_AT_WORLDGEN" ) ) {
-                        return false;
+        const point_abs_omt lo = base + point_rel_omt{ p.x() - r, p.y() - r };
+        const point_abs_omt hi = base + point_rel_omt{ p.x() + r, p.y() + r };
+        const point_abs_om om_lo = coords::project_to<coords::om>( lo );
+        const point_abs_om om_hi = coords::project_to<coords::om>( hi );
+        for( int omx = om_lo.x(); omx <= om_hi.x(); ++omx ) {
+            for( int omy = om_lo.y(); omy <= om_hi.y(); ++omy ) {
+                const overmap *om = overmap_buffer.get_existing( point_abs_om( omx, omy ) );
+                if( om == nullptr ) {
+                    continue;
+                }
+                const std::bitset<OMAPX *OMAPY> *bits =
+                    om->safe_at_worldgen_bits[p.z() + OVERMAP_DEPTH].get();
+                if( bits == nullptr ) {
+                    continue;
+                }
+                const point_abs_omt om_base = coords::project_to<coords::omt>( om->pos() );
+                const point_rel_omt l = lo - om_base;
+                const point_rel_omt h = hi - om_base;
+                const int x0 = std::max( l.x(), 0 );
+                const int y0 = std::max( l.y(), 0 );
+                const int x1 = std::min( h.x(), OMAPX - 1 );
+                const int y1 = std::min( h.y(), OMAPY - 1 );
+                for( int x = x0; x <= x1; ++x ) {
+                    for( int y = y0; y <= y1; ++y ) {
+                        if( !bits->test( y * OMAPX + x ) ) {
+                            continue;
+                        }
+                        const std::optional<overmap_special_id> spec =
+                            om->overmap_special_at( tripoint_om_omt( x, y, p.z() ) );
+                        if( spec.has_value() && spec.value().obj().has_flag( "SAFE_AT_WORLDGEN" ) ) {
+                            return false;
+                        }
                     }
                 }
             }
@@ -3060,10 +3130,10 @@ std::vector<tripoint_om_omt> overmap::place_special(
         joins_used[join.first] = join.second;
     }
     for( const tripoint_om_omt &location : result.omts_used ) {
-        overmap_special_placements[location] = special.id;
+        set_special_placement( location, special.id );
         mapgen_args_index[location] = mapgen_args_p;
         if( is_safe_zone ) {
-            safe_at_worldgen.emplace( location );
+            add_safe_at_worldgen( location );
         }
     }
 

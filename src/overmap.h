@@ -216,7 +216,9 @@ struct map_layer {
     cata::mdarray<oter_id, point_om_omt> terrain;
     cata::mdarray<om_vision_level, point_om_omt> visible;
     cata::mdarray<bool, point_om_omt> explored;
-    cata::mdarray<std::shared_ptr<map_data_summary>, point_om_omt> map_cache;
+    // Allocated on the first write that differs from the default placeholder; until then
+    // every entry of the layer reads as that placeholder (see overmap::map_cache_at).
+    std::unique_ptr<cata::mdarray<std::shared_ptr<map_data_summary>, point_om_omt>> map_cache;
     std::vector<om_note> notes;
     std::vector<om_map_extra> extras;
 };
@@ -531,6 +533,8 @@ class overmap
     private:
         void set_passable( const tripoint_abs_omt &p, std::shared_ptr<map_data_summary> new_passable );
         void set_passable( const tripoint_abs_omt &p, string_id<map_data_summary> new_passable );
+        const std::shared_ptr<map_data_summary> &map_cache_at( const tripoint_om_omt &p ) const;
+        void map_cache_set( const tripoint_om_omt &p, std::shared_ptr<map_data_summary> value );
         std::optional<tripoint_om_ms> find_open_space_in_submap( const tripoint_om_ms &submap_origin,
                 point_rel_ms &cursor );
     public:
@@ -678,9 +682,18 @@ class overmap
         // can be used after placement to lookup whether a given location was created
         // as part of a special.
         std::unordered_map<tripoint_om_omt, overmap_special_id> overmap_special_placements;
+        // How many locations in overmap_special_placements hold each special, so
+        // contains_unique_special need not scan them all. Rebuilt on load.
+        std::unordered_map<overmap_special_id, int> special_placement_counts; // NOLINT(cata-serialize)
+        void set_special_placement( const tripoint_om_omt &p, const overmap_special_id &id );
         // Records location where mongroups are not allowed to spawn during worldgen.
         // Reconstructed on load, so need not be serialized.
         std::unordered_set<tripoint_om_omt> safe_at_worldgen; // NOLINT(cata-serialize)
+        // The same locations as one bitmap per z-level (allocated on first use), so
+        // can_place_special can test a window of tiles cheaply.
+        std::array<std::unique_ptr<std::bitset<OMAPX *OMAPY>>, OVERMAP_LAYERS>
+                safe_at_worldgen_bits; // NOLINT(cata-serialize)
+        void add_safe_at_worldgen( const tripoint_om_omt &p );
 
         // For oter_ts with the requires_predecessor flag, we need to store the
         // predecessor terrains so they can be used for mapgen later

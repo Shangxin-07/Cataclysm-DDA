@@ -766,9 +766,9 @@ void overmap::unserialize( const JsonObject &jsobj )
                                             if( name == "p" ) {
                                                 point_member.read( p );
                                                 if( !s.is_null() ) {
-                                                    overmap_special_placements[p] = s;
+                                                    set_special_placement( p, s );
                                                     if( is_safe_zone ) {
-                                                        safe_at_worldgen.emplace( p );
+                                                        add_safe_at_worldgen( p );
                                                     }
                                                 }
                                             }
@@ -1313,10 +1313,14 @@ void overmap::serialize( std::ostream &fout ) const
     json.member( "map_data" );
     json.start_array();
     for( int z = 0; z < OVERMAP_LAYERS; ++z ) {
+        if( !layer[z].map_cache ) {
+            // Never written, so every entry is the default placeholder.
+            continue;
+        }
         for( tripoint_om_omt entry_location{ 0, 0, z - OVERMAP_HEIGHT };
              entry_location.y() < 180; entry_location.y()++ ) {
             for( entry_location.x() = 0; entry_location.x() < 180; entry_location.x()++ ) {
-                std::shared_ptr<map_data_summary> summary = layer[z].map_cache[ entry_location.xy() ];
+                const std::shared_ptr<map_data_summary> &summary = map_cache_at( entry_location );
                 // We don't serialize placeholders, we regenerate them from the ter for their location.
                 if( summary->placeholder ) {
                     continue;
