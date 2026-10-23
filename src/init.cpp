@@ -1,13 +1,16 @@
 #include "init.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 #include "achievement.h"
@@ -22,8 +25,10 @@
 #include "bodygraph.h"
 #include "bodypart.h"
 #include "butchery_requirements.h"
+#include "cached_options.h"
 #include "cata_assert.h"
 #include "cata_scope_helpers.h"
+#include "cata_utility.h"
 #include "character_modifier.h"
 #include "city.h"
 #include "climbing.h"
@@ -48,11 +53,11 @@
 #include "faction_camp.h"
 #include "fault.h"
 #include "field_type.h"
-#include "mapgen_post_process.h"
 #include "filesystem.h"
 #include "flag.h"
 #include "flexbuffer_json.h"
 #include "gates.h"
+#include "get_version.h"
 #include "global_vars.h"
 #include "harvest.h"
 #include "help.h"
@@ -72,6 +77,7 @@
 #include "map_extras.h"
 #include "mapdata.h"
 #include "mapgen.h"
+#include "mapgen_post_process.h"
 #include "martialarts.h"
 #include "material.h"
 #include "math_parser_jmath.h"
@@ -96,6 +102,7 @@
 #include "overmap_location.h"
 #include "overmap_map_data_cache.h"
 #include "overmap_worldgen.h"
+#include "path_info.h"
 #include "profession.h"
 #include "profession_group.h"
 #include "proficiency.h"
@@ -520,6 +527,62 @@ void DynamicDataLoader::initialize()
 #endif
 }
 
+namespace
+{
+// Running FNV-1a hash of every data file loaded since the last unload: its mod, path, size
+// and modification time. Unchanged data that passed verification before need not be
+// verified again in full.
+constexpr uint64_t fingerprint_basis = 14695981039346656037ULL;
+uint64_t loaded_data_fingerprint = fingerprint_basis;
+
+void fingerprint_add( std::string_view text )
+{
+    for( const char c : text ) {
+        loaded_data_fingerprint ^= static_cast<unsigned char>( c );
+        loaded_data_fingerprint *= 1099511628211ULL;
+    }
+    // separator, so that consecutive fields cannot run together
+    loaded_data_fingerprint ^= 0xff;
+    loaded_data_fingerprint *= 1099511628211ULL;
+}
+
+void fingerprint_add_file( std::string_view src, const cata_path &file )
+{
+    const std::filesystem::path p = file.get_unrelative_path();
+    std::error_code ec;
+    const uintmax_t size = std::filesystem::file_size( p, ec );
+    const auto mtime = std::filesystem::last_write_time( p, ec );
+    fingerprint_add( src );
+    fingerprint_add( p.generic_u8string() );
+    fingerprint_add( std::to_string( size ) );
+    fingerprint_add( std::to_string( mtime.time_since_epoch().count() ) );
+}
+
+std::string verification_fingerprint()
+{
+    return string_format( "%s %016llx", getVersionString(),
+                          static_cast<unsigned long long>( loaded_data_fingerprint ) );
+}
+
+cata_path verified_data_file()
+{
+    return PATH_INFO::config_dir_path() / "verified_data.txt";
+}
+
+// True when this exact data set already passed verification with no errors.
+bool data_verified_before()
+{
+    if( test_mode ) {
+        return false;
+    }
+    std::string stored;
+    read_from_file_optional( verified_data_file(), [&stored]( std::istream & fin ) {
+        std::getline( fin, stored );
+    } );
+    return !stored.empty() && stored == verification_fingerprint();
+}
+} // namespace
+
 void DynamicDataLoader::load_data_from_path( const cata_path &path, const std::string &src )
 {
     cata_assert( !finalized &&
@@ -542,6 +605,7 @@ void DynamicDataLoader::load_data_from_path( const cata_path &path, const std::s
     for( const cata_path &file : files ) {
         try {
             // parse it
+            fingerprint_add_file( src, file );
             JsonValue jsin = json_loader::from_path( file );
             load_all_from_json( jsin, src, path, file );
         } catch( const JsonError &err ) {
@@ -575,6 +639,7 @@ void DynamicDataLoader::load_mod_data_from_path( const cata_path &path, const st
     for( const cata_path &file : files ) {
         try {
             // parse it
+            fingerprint_add_file( src, file );
             JsonValue jsin = json_loader::from_path( file );
             load_all_from_json( jsin, src, path, file );
         } catch( const JsonError &err ) {
@@ -614,6 +679,7 @@ void DynamicDataLoader::load_mod_interaction_files_from_path( const cata_path &p
     for( const std::pair<const mod_id, cata_path> &file : files ) {
         try {
             // parse it
+            fingerprint_add_file( src, file.second );
             JsonValue jsin = json_loader::from_path( file.second );
             load_all_from_json( jsin, string_format( "%s#%s", src, file.first.str() ), path, file.second );
         } catch( const JsonError &err ) {
@@ -645,6 +711,7 @@ void DynamicDataLoader::load_all_from_json( const JsonValue &jsin, const std::st
 void DynamicDataLoader::unload_data()
 {
     finalized = false;
+    loaded_data_fingerprint = fingerprint_basis;
 
     achievement::reset();
     activity_type::reset();
@@ -953,6 +1020,9 @@ void DynamicDataLoader::finalize_loaded_data()
 
 void DynamicDataLoader::check_consistency()
 {
+    // Item and mapgen checks only read the loaded data and take most of the verification
+    // time, so they are skipped when the same data already passed them.
+    const bool verified_before = data_verified_before();
     using named_entry = std::pair<std::string, std::function<void()>>;
     const std::vector<named_entry> entries = {{
             { _( "Flags" ), &json_flag::check_consistency },
@@ -976,7 +1046,14 @@ void DynamicDataLoader::check_consistency()
             { _( "Activities" ), &activity_type::check_consistency },
             { _( "Addiction types" ), &add_type::check_add_types },
             { _( "Bash damage profiles" ), &bash_damage_profile::check_all },
-            { _( "Items" ), &items::check_consistency },
+            {
+                _( "Items" ), [verified_before]()
+                {
+                    if( !verified_before ) {
+                        items::check_consistency();
+                    }
+                }
+            },
             { _( "Materials" ), &materials::check },
             { _( "Faults" ), &faults::check_consistency },
             { _( "Post-process generators" ), &pp_generators::check_consistency },
@@ -984,7 +1061,14 @@ void DynamicDataLoader::check_consistency()
             { _( "Vehicle parts" ), &vehicles::parts::check },
             { _( "Vehicle part locations" ), &vpart_location::check_all },
             { _( "Vehicle part migrations" ), &vpart_migration::check },
-            { _( "Mapgen definitions" ), &check_mapgen_definitions },
+            {
+                _( "Mapgen definitions" ), [verified_before]()
+                {
+                    if( !verified_before ) {
+                        check_mapgen_definitions();
+                    }
+                }
+            },
             { _( "Mapgen palettes" ), &mapgen_palette::check_definitions },
             {
                 _( "Monster types" ), []()
@@ -1055,5 +1139,12 @@ void DynamicDataLoader::check_consistency()
     for( const named_entry &e : entries ) {
         loading_ui::show( _( "Verifying" ), e.first );
         e.second();
+    }
+
+    if( !test_mode && !verified_before && !debug_has_error_been_observed() ) {
+        const std::string fingerprint = verification_fingerprint();
+        write_to_file( verified_data_file(), [&fingerprint]( std::ostream & fout ) {
+            fout << fingerprint << '\n';
+        }, nullptr );
     }
 }
