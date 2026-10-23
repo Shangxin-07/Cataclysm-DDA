@@ -2,9 +2,12 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <iterator>
+#include <type_traits>
+#include <vector>
 
 #include "coordinates.h"
 #include "cuboid_rectangle.h"
@@ -96,16 +99,25 @@ class intensity_memo
         explicit intensity_memo( const T &numerator ) : numerator_( numerator ) {}
 
         T get( const T &cumulative, const int distance ) {
-            if( distance < 0 || distance >= max_distance ) {
-                return calc( numerator_, cumulative, distance );
-            }
+            use( cumulative );
+            return at( distance );
+        }
+
+        // the value later at() calls are for
+        void use( const T &cumulative ) {
             if( !( cumulative == cumulative_ ) || generation_ == 0 ) {
                 cumulative_ = cumulative;
                 ++generation_;
             }
+        }
+
+        T at( const int distance ) {
+            if( distance < 0 || distance >= max_distance ) {
+                return calc( numerator_, cumulative_, distance );
+            }
             if( filled_[distance] != generation_ ) {
                 filled_[distance] = generation_;
-                values_[distance] = calc( numerator_, cumulative, distance );
+                values_[distance] = calc( numerator_, cumulative_, distance );
             }
             return values_[distance];
         }
@@ -119,6 +131,24 @@ class intensity_memo
         std::array<unsigned, max_distance> filled_ = {};
         std::array<T, max_distance> values_ = {};
 };
+
+/**
+ * rl_dist() of a delta with circular distances on, by the delta's squared length,
+ * for every delta a cast of MAX_VIEW_DISTANCE reaches.
+ */
+const std::vector<int> &trig_dist_3d_lut()
+{
+    static const std::vector<int> lut = []() {
+        std::vector<int> t( 3 * MAX_VIEW_DISTANCE * MAX_VIEW_DISTANCE + 1 );
+        for( size_t i = 0; i < t.size(); ++i ) {
+            // the float step matches trig_dist(), which rl_dist() truncates
+            t[i] = static_cast<int>( static_cast<float>( std::sqrt( static_cast<double>( i ) ) ) );
+        }
+        return t;
+    }
+    ();
+    return lut;
+}
 } // namespace
 
 template<typename T, bool( *is_transparent )( const T &, const T & ), T( *accumulate )( const T &, const T &, const int & )>
@@ -233,10 +263,20 @@ static void cast_horizontal_zlight_segment(
     static half_open_rectangle<point_bub_ms> bounds( point_bub_ms::zero, point_bub_ms( MAPSIZE_X,
             MAPSIZE_Y ) );
 
+    // with the whole octant inside the map no tile needs a bounds check
+    const bool all_inbounds = offset.x() - radius >= 0 && offset.x() + radius < MAPSIZE_X &&
+                              offset.y() - radius >= 0 && offset.y() + radius < MAPSIZE_Y;
+    const std::vector<int> &trig_dists = trig_dist_3d_lut();
+    tripoint_rel_ms delta;
+    // rl_dist() from the origin to delta, given delta's squared length, plus the offset
+    const auto tile_distance = [&]( const int squared ) {
+        return ( trigdist && squared < static_cast<int>( trig_dists.size() ) ? trig_dists[squared] :
+                 rl_dist( tripoint_rel_ms::zero, delta ) ) + offset_distance;
+    };
+
     slope new_start_minor( 1, 1 );
 
     T last_intensity( 0.0 );
-    tripoint_rel_ms delta;
     intensity_memo<T, calc> intensities( numerator );
     tripoint_bub_ms current;
 
@@ -258,6 +298,9 @@ static void cast_horizontal_zlight_segment(
 
         for( auto this_span = spans.begin(); this_span != spans.end(); ) {
             bool started_block = false;
+            // splitting never changes the span's value, so every tile of it reads
+            // the same distance table
+            intensities.use( this_span->cumulative_value );
             // TODO: Precalculate min/max delta.z based on start/end and distance
             for( delta.z() = first_leading_edge_at( this_span->start_major, distance * 2 - 1 );
                  delta.z() <= std::min( distance, levels_ahead ); delta.z()++ ) {
@@ -307,6 +350,16 @@ static void cast_horizontal_zlight_segment(
 
                 bool started_span = false;
                 const int z_index = current.z() + OVERMAP_DEPTH;
+                const cata::mdarray<std::remove_const_t<T>, point_bub_ms> &input = *input_arrays[z_index];
+                cata::mdarray<T, point_bub_ms> &output = *output_caches[z_index];
+                // If we're looking at a tile with floor or roof from the floor/roof side,
+                // that tile is actually invisible to us.
+                // TODO: Revisit this logic and differentiate between "can see bottom of tile"
+                // and "can see majority of tile".
+                const cata::mdarray<bool, point_bub_ms> *const floors =
+                    current.z() < offset.z() ? floor_caches[z_index + 1] :
+                    current.z() > offset.z() ? floor_caches[z_index] : nullptr;
+                const int dz_squared = delta.z() * delta.z();
                 for( delta.x() = first_leading_edge_at( this_span->start_minor, distance * 2 - 1 );
                      delta.x() <= distance; delta.x()++ ) {
                     current.x() = offset.x() + delta.x() * xx_transform + delta.y() * xy_transform;
@@ -315,7 +368,7 @@ static void cast_horizontal_zlight_segment(
                     const slope trailing_edge_minor( delta.x() * 2 - 1, delta.y() * 2 + 1 );
                     const slope leading_edge_minor( delta.x() * 2 + 1, delta.y() * 2 - 1 );
 
-                    if( !bounds.contains( current.xy() ) ) {
+                    if( !all_inbounds && !bounds.contains( current.xy() ) ) {
                         // Current tile is out of bounds, advance to the next tile.
                         continue;
                     }
@@ -335,23 +388,11 @@ static void cast_horizontal_zlight_segment(
                         break;
                     }
 
-                    T new_transparency = ( *input_arrays[z_index] )[current.x()][current.y()];
+                    T new_transparency = input[current.x()][current.y()];
 
-                    // If we're looking at a tile with floor or roof from the floor/roof side,
-                    // that tile is actually invisible to us.
-                    // TODO: Revisit this logic and differentiate between "can see bottom of tile"
-                    // and "can see majority of tile".
-                    bool floor_block = false;
-                    if( current.z() < offset.z() ) {
-                        if( ( *floor_caches[z_index + 1] )[current.x()][current.y()] ) {
-                            floor_block = true;
-                            new_transparency = LIGHT_TRANSPARENCY_SOLID;
-                        }
-                    } else if( current.z() > offset.z() ) {
-                        if( ( *floor_caches[z_index] )[current.x()][current.y()] ) {
-                            floor_block = true;
-                            new_transparency = LIGHT_TRANSPARENCY_SOLID;
-                        }
+                    const bool floor_block = floors != nullptr && ( *floors )[current.x()][current.y()];
+                    if( floor_block ) {
+                        new_transparency = LIGHT_TRANSPARENCY_SOLID;
                     }
 
                     if( !started_block ) {
@@ -359,12 +400,12 @@ static void cast_horizontal_zlight_segment(
                         current_transparency = new_transparency;
                     }
 
-                    const int dist = rl_dist( tripoint_rel_ms::zero, delta ) + offset_distance;
-                    last_intensity = intensities.get( this_span->cumulative_value, dist );
+                    last_intensity = intensities.at( tile_distance(
+                                                         delta.x() * delta.x() + delta.y() * delta.y() + dz_squared ) );
 
                     if( !floor_block ) {
-                        ( *output_caches[z_index] )[current.x()][current.y()] =
-                            std::max( ( *output_caches[z_index] )[current.x()][current.y()], last_intensity );
+                        T &out = output[current.x()][current.y()];
+                        out = std::max( out, last_intensity );
                     }
 
                     if( !started_span ) {
@@ -376,6 +417,32 @@ static void cast_horizontal_zlight_segment(
                     if( new_transparency == current_transparency ) {
                         // All in order, no need to split the span.
                         new_start_minor = leading_edge_minor;
+                        if( !all_inbounds ) {
+                            continue;
+                        }
+                        // The tiles after this one in the row pass the span's start checks too,
+                        // and the run lasts until the transparency changes or a floor blocks,
+                        // so process it without them. The tile that ends it goes through the
+                        // checks above.
+                        const int dy_squared = delta.y() * delta.y() + dz_squared;
+                        for( int next_x = delta.x() + 1; next_x <= distance; ++next_x ) {
+                            if( this_span->end_minor < slope( next_x * 2 - 1, delta.y() * 2 + 1 ) ) {
+                                break;
+                            }
+                            const point_bub_ms next( offset.x() + next_x * xx_transform + delta.y() * xy_transform,
+                                                     offset.y() + next_x * yx_transform + delta.y() * yy_transform );
+                            if( ( floors != nullptr && ( *floors )[next] ) ||
+                                !( input[next] == current_transparency ) ) {
+                                break;
+                            }
+                            delta.x() = next_x;
+                            current.x() = next.x();
+                            current.y() = next.y();
+                            last_intensity = intensities.at( tile_distance( next_x * next_x + dy_squared ) );
+                            T &out = output[next];
+                            out = std::max( out, last_intensity );
+                            new_start_minor = slope( next_x * 2 + 1, delta.y() * 2 - 1 );
+                        }
                         continue;
                     }
 

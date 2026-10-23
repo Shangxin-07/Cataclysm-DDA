@@ -41,7 +41,7 @@ static const trait_id trait_DEBUG_NOTEMP( "DEBUG_NOTEMP" );
 
 // Whole-turn throughput on a real generated city, for profiling.
 // Run with: tests/cata_test "[turn_benchmark]"
-// Tune with env BENCH_TURNS, BENCH_MONSTERS, BENCH_NPCS, BENCH_SEED.
+// Tune with env BENCH_TURNS, BENCH_MONSTERS, BENCH_NPCS, BENCH_SEED, BENCH_PREGEN.
 // BENCH_SAVES=N also times N full saves after the turns.
 static int env_int( const char *name, int fallback )
 {
@@ -125,6 +125,17 @@ TEST_CASE( "turn_throughput_city", "[.][turn_benchmark]" )
                  here.get_abs_sub().to_string().c_str() );
     u.add_effect( effect_sleep, 1000_days );
     u.set_moves( 0 );
+
+    // NPCs looking for somewhere to go generate the overmaps around them, a cost
+    // paid once per world; BENCH_PREGEN=1 pays it here to time steady turns
+    if( env_int( "BENCH_PREGEN", 0 ) != 0 ) {
+        const point_abs_om here_om = project_to<coords::om>( u.pos_abs().xy() );
+        for( int dx = -1; dx <= 1; ++dx ) {
+            for( int dy = -1; dy <= 1; ++dy ) {
+                overmap_buffer.get( here_om + point( dx, dy ) );
+            }
+        }
+    }
 
     // the first turn builds every cache from scratch; keep it out of the numbers
     u.set_moves( 0 );
