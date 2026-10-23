@@ -258,15 +258,6 @@ std::map<field_type_id, field_entry>::const_iterator field::end() const
     return _field_type_list->end();
 }
 
-/*
-Function: displayed_field_type
-Returns the last added field type from the tile for drawing purposes.
-*/
-field_type_id field::displayed_field_type() const
-{
-    return _displayed_field_type;
-}
-
 description_affix field::displayed_description_affix() const
 {
     return _displayed_field_type.obj().desc_affix;
