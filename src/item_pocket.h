@@ -352,6 +352,8 @@ class item_pocket
         // insert_item for an item can_contain( it ) already accepted, without checking again
         item *insert_contained_item( const item &it, bool into_bottom = false,
                                      bool restack_charges = true );
+        item *insert_contained_item( item &&it, bool into_bottom = false,
+                                     bool restack_charges = true );
         /**
           * adds an item to the pocket with no checks
           * may create a new pocket
@@ -456,6 +458,10 @@ class item_pocket
         // the items inside the pocket
         std::list<item> contents;
         bool _sealed = false;
+        // whether two count-by-charges items share a type, i.e. restack could merge something
+        bool has_restackable_pair() const;
+        // adds it to the running totals while a bulk fill is active
+        void add_to_bulk_fill( const item &it );
         // Running totals tracked only between begin_bulk_fill()/end_bulk_fill().
         std::optional<units::volume> bulk_fill_volume; // NOLINT(cata-serialize)
         std::optional<units::mass> bulk_fill_weight; // NOLINT(cata-serialize)

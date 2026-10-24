@@ -342,6 +342,10 @@ class Single_item_creator : public Item_spawn_data
         std::string id;
         Type type;
         std::optional<Item_modifier> modifier;
+        // id as a typed id, so spawning doesn't intern the string each time;
+        // only the one matching type is set
+        itype_id item_type_id;
+        item_group_id group_type_id;
 
         void inherit_ammo_mag_chances( int ammo, int mag );
 

@@ -285,6 +285,23 @@ ret_val<void> item::put_in( const item &payload, pocket_type pk_type,
     return ret_val<void>::make_success( result.str() );
 }
 
+ret_val<void> item::put_in_moving( item &payload, pocket_type pk_type, const bool quiet )
+{
+    if( pk_type == pocket_type::MOD ) {
+        return put_in( payload, pk_type, false, nullptr, quiet );
+    }
+    ret_val<item *> result = contents.insert_item_moving( payload, pk_type );
+    if( !result.success() ) {
+        if( !quiet ) {
+            debugmsg( "tried to put an item (%s) count (%d) in a container (%s) that cannot contain it: %s",
+                      payload.typeId().str(), payload.count(), typeId().str(), result.str() );
+        }
+        return ret_val<void>::make_failure( result.str() );
+    }
+    on_contents_changed();
+    return ret_val<void>::make_success( result.str() );
+}
+
 void item::force_insert_item( const item &it, pocket_type pk_type )
 {
     contents.force_insert_item( it, pk_type );
