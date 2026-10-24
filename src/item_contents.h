@@ -162,6 +162,11 @@ class item_contents
         bool allows_speedloader( const itype_id &speedloader_id ) const;
 
         std::vector<const item *> mods() const;
+        // whether any MOD pocket holds an item, i.e. whether mods() or gunmods() can be non-empty
+        bool has_mod_items() const;
+        // whether rhs has as many pockets and its CONTAINER pockets have the same
+        // item and category white/blacklists, in order
+        bool same_container_lists( const item_contents &rhs ) const;
 
         std::vector<const item *> softwares() const;
 

@@ -829,10 +829,8 @@ int item::fill_with( const item &contained, const int amount,
                 contained_item.charges = std::min( amount - num_contained,
                                                    pocket->remaining_ammo_capacity( ammo ) );
             } else {
-                contained_item.charges = std::min( { amount - num_contained,
-                                                     pocket->charges_per_remaining_volume( contained_item ),
-                                                     pocket->charges_per_remaining_weight( contained_item )
-                                                   } );
+                contained_item.charges = std::min( amount - num_contained,
+                                                   pocket->charges_per_remaining_space( contained_item ) );
             }
 
             if( contained_item.charges == 0 ) {

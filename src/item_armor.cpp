@@ -1339,6 +1339,9 @@ const islot_armor *item::find_armor_data() const
     // Currently the only way to make a non-armor item into armor is to install a gun mod.
     // The gunmods are stored in the items contents, as are the contents of a container, and the
     // tools in a tool belt (a container actually), or the ammo in a quiver (container again).
+    if( !contents.has_mod_items() ) {
+        return nullptr;
+    }
     for( const item *mod : gunmods() ) {
         if( mod->type->armor ) {
             return &*mod->type->armor;
