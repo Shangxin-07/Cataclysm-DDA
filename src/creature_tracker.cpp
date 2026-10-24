@@ -16,6 +16,7 @@
 #include "cata_assert.h"
 #include "debug.h"
 #include "game.h"
+#include "level_cache.h"
 #include "map.h"
 #include "map_scale_constants.h"
 #include "mapdata.h"
@@ -423,10 +424,27 @@ const zone_row &zone_fill::open_row( int z, int y )
     if( !open_known_[zi][y] ) {
         open_known_[zi].set( y );
         row.reset();
-        for( int x = 0; x < MAPSIZE_X; ++x ) {
-            const tripoint_bub_ms p( x, y, z );
-            if( here_->inbounds( p ) && ( here_->is_transparent_wo_fields( p ) || here_->passable( p ) ) ) {
-                row.set( x );
+        // inbounds is a box test, so the whole row is in bounds if both ends are
+        if( here_->inbounds( tripoint_bub_ms( 0, y, z ) ) &&
+            here_->inbounds( tripoint_bub_ms( MAPSIZE_X - 1, y, z ) ) ) {
+            const level_cache &cache = here_->get_cache_ref( z );
+            for( int x = 0; x < MAPSIZE_X; ++x ) {
+                if( cache.transparent_cache_wo_fields[x][y] ) {
+                    row.set( x );
+                    continue;
+                }
+                const tripoint_bub_ms p( x, y, z );
+                // A wall is never passable, whatever stands in it; most opaque tiles are walls.
+                if( here_->maptile_at( p ).get_ter_t().movecost != 0 && here_->passable( p ) ) {
+                    row.set( x );
+                }
+            }
+        } else {
+            for( int x = 0; x < MAPSIZE_X; ++x ) {
+                const tripoint_bub_ms p( x, y, z );
+                if( here_->inbounds( p ) && ( here_->is_transparent_wo_fields( p ) || here_->passable( p ) ) ) {
+                    row.set( x );
+                }
             }
         }
     }

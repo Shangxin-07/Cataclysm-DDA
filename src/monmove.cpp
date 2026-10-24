@@ -522,6 +522,10 @@ void monster::anger_cub_threatened( monster_plan &mon_plan )
         // return early, not angered by cubs being threatened
         return;
     }
+    if( type->baby_type.baby_monster.is_null() && type->baby_type.baby_monster_group.is_null() ) {
+        // no monster counts as this one's baby
+        return;
+    }
 
     for( monster &tmp : g->all_monsters() ) {
         bool is_baby = false;
