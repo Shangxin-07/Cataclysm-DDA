@@ -268,6 +268,20 @@ bool item_pocket::same_contents( const item_pocket &rhs ) const
     } );
 }
 
+bool item_pocket::has_restackable_pair() const
+{
+    // item::combine only merges count-by-charges items of the same type, so
+    // restacking can only change anything if two of those share a type.
+    std::vector<itype_id> types;
+    for( const item &it : contents ) {
+        if( it.count_by_charges() ) {
+            types.push_back( it.typeId() );
+        }
+    }
+    std::sort( types.begin(), types.end() );
+    return std::adjacent_find( types.begin(), types.end() ) != types.end();
+}
+
 void item_pocket::restack()
 {
     if( contents.size() <= 1 ) {
@@ -291,6 +305,9 @@ void item_pocket::restack()
                 ++iter;
             }
         }
+        return;
+    }
+    if( !has_restackable_pair() ) {
         return;
     }
     for( auto outer_iter = contents.begin(); outer_iter != contents.end(); ++outer_iter ) {
@@ -340,6 +357,9 @@ item *item_pocket::restack( /*const*/ item *it )
                 ++iter;
             }
         }
+        return ret;
+    }
+    if( !has_restackable_pair() ) {
         return ret;
     }
     for( auto outer_iter = contents.begin(); outer_iter != contents.end(); ++outer_iter ) {
@@ -1452,12 +1472,13 @@ ret_val<item_pocket::contain_code> item_pocket::is_compatible( const item &it ) 
         return ret_val<item_pocket::contain_code>::make_failure(
                    contain_code::ERR_TOO_BIG, _( "item is too big" ) );
     }
-    if( it.length() > data->max_item_length ) {
+    const units::length it_length = it.length();
+    if( it_length > data->max_item_length ) {
         return ret_val<item_pocket::contain_code>::make_failure(
                    contain_code::ERR_TOO_BIG, _( "item is too long" ) );
     }
 
-    if( it.length() < data->min_item_length ) {
+    if( it_length < data->min_item_length ) {
         return ret_val<item_pocket::contain_code>::make_failure(
                    contain_code::ERR_TOO_SMALL, _( "item is too short" ) );
     }
@@ -2270,6 +2291,16 @@ ret_val<item *> item_pocket::insert_item( const item &it,
     return ret_val<item *>::make_success( insert_contained_item( it, into_bottom, restack_charges ) );
 }
 
+void item_pocket::add_to_bulk_fill( const item &it )
+{
+    if( bulk_fill_volume ) {
+        // restack conserves total volume/weight, so the inserted item's own
+        // contribution is the delta regardless of any merge.
+        *bulk_fill_volume += it.volume();
+        *bulk_fill_weight += it.weight();
+    }
+}
+
 item *item_pocket::insert_contained_item( const item &it, const bool into_bottom,
         const bool restack_charges )
 {
@@ -2284,11 +2315,25 @@ item *item_pocket::insert_contained_item( const item &it, const bool into_bottom
     if( restack_charges && it.count_by_charges() ) {
         inserted = restack( inserted );
     }
-    if( bulk_fill_volume ) {
-        // restack conserves total volume/weight, so the inserted item's own
-        // contribution is the delta regardless of any merge.
-        *bulk_fill_volume += it.volume();
-        *bulk_fill_weight += it.weight();
+    add_to_bulk_fill( it );
+    return inserted;
+}
+
+item *item_pocket::insert_contained_item( item &&it, const bool into_bottom,
+        const bool restack_charges )
+{
+    const bool restack_it = restack_charges && it.count_by_charges();
+    add_to_bulk_fill( it );
+    item *inserted = nullptr;
+    if( !into_bottom ) {
+        contents.push_front( std::move( it ) );
+        inserted = &contents.front();
+    } else {
+        contents.push_back( std::move( it ) );
+        inserted = &contents.back();
+    }
+    if( restack_it ) {
+        inserted = restack( inserted );
     }
     return inserted;
 }

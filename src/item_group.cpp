@@ -144,7 +144,7 @@ static void put_into_container(
     for( auto it = items.end() - num_items; it != items.end(); ++it ) {
         // quiet=true: caller handles failure via the overflow path below.
         const pocket_type pk_type = guess_pocket_for( ctr, *it );
-        ret_val<void> ret = ctr.put_in( *it, pk_type, false, nullptr, /*quiet=*/true );
+        ret_val<void> ret = ctr.put_in_moving( *it, pk_type, /*quiet=*/true );
         if( ret.success() ) {
             continue;
         }
@@ -189,6 +189,11 @@ Single_item_creator::Single_item_creator( const std::string &_id, Type _type, in
     , id( _id )
     , type( _type )
 {
+    if( type == S_ITEM ) {
+        item_type_id = itype_id( id );
+    } else if( type == S_ITEM_GROUP ) {
+        group_type_id = item_group_id( id );
+    }
 }
 item Single_item_creator::create_single( const time_point &birthday, RecursionList &rec ) const
 {
@@ -209,7 +214,7 @@ item Single_item_creator::create_single_without_container( const time_point &bir
     }
     Item_spawn_data *isd = nullptr;
     if( type == S_ITEM_GROUP ) {
-        item_group_id group_id( id );
+        const item_group_id &group_id = group_type_id;
         if( std::find( rec.begin(), rec.end(), group_id ) != rec.end() ) {
             debugmsg( "recursion in item spawn list %s", id.c_str() );
             return item( itype_id::NULL_ID(), birthday );
@@ -236,7 +241,7 @@ item Single_item_creator::create_single_without_container( const time_point &bir
             if( id == "corpse" ) {
                 return item::make_corpse( mtype_id::NULL_ID(), birthday );
             } else {
-                return item( itype_id( id ), birthday );
+                return item( item_type_id, birthday );
             }
         }
     } )();
@@ -304,7 +309,7 @@ std::size_t Single_item_creator::create( ItemList &list,
                 list.emplace_back( std::move( itm ) );
             }
         } else {
-            item_group_id group_id( id );
+            const item_group_id &group_id = group_type_id;
             if( std::find( rec.begin(), rec.end(), group_id ) != rec.end() ) {
                 debugmsg( "recursion in item spawn list %s", id.c_str() );
                 return list.size() - prev_list_size;
@@ -398,6 +403,7 @@ void Single_item_creator::replace_items( const std::unordered_map<itype_id, ityp
         auto it = replacements.find( itype_id( id ) );
         if( it != replacements.end() ) {
             id = it->second.str();
+            item_type_id = it->second;
         }
     }
     // This part of code is currently only used in Item_factory::finalize_item_blacklist(), not during the game.

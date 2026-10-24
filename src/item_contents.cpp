@@ -936,6 +936,23 @@ ret_val<item *> item_contents::insert_item( const item &it,
     return ret_val<item *>::make_failure( nullptr, inserted.str() );
 }
 
+ret_val<item *> item_contents::insert_item_moving( item &it, pocket_type pk_type )
+{
+    if( pk_type == pocket_type::LAST ) {
+        pk_type = pocket_type::CONTAINER;
+    }
+    if( pk_type != pocket_type::CONTAINER && pk_type != pocket_type::MAGAZINE &&
+        pk_type != pocket_type::MAGAZINE_WELL ) {
+        return insert_item( it, pk_type );
+    }
+    ret_val<item_pocket *> pocket = find_pocket_for( it, pk_type );
+    if( !pocket.success() ) {
+        return ret_val<item *>::make_failure( nullptr, pocket.str() );
+    }
+    // As in insert_item, find_pocket_for already checked can_contain( it ).
+    return ret_val<item *>::make_success( pocket.value()->insert_contained_item( std::move( it ) ) );
+}
+
 void item_contents::force_insert_item( const item &it, pocket_type pk_type )
 {
     for( item_pocket &pocket : contents ) {

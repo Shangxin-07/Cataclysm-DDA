@@ -345,6 +345,9 @@ class item_contents
          */
         ret_val<item *> insert_item( const item &it, pocket_type pk_type,
                                      bool ignore_contents = false, bool unseal_pockets = false );
+        // Same as insert_item, but on success moves @p it into the pocket
+        // instead of copying it. On failure @p it is left untouched.
+        ret_val<item *> insert_item_moving( item &it, pocket_type pk_type );
         void force_insert_item( const item &it, pocket_type pk_type );
         bool can_unload_liquid() const;
 

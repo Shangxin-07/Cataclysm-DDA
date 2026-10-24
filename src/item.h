@@ -1055,6 +1055,9 @@ class item
         ret_val<void> put_in( const item &payload, pocket_type pk_type,
                               bool unseal_pockets = false, Character *carrier = nullptr,
                               bool quiet = false );
+        // Same as put_in, but on success moves @p payload into this item
+        // instead of copying it. On failure @p payload is left untouched.
+        ret_val<void> put_in_moving( item &payload, pocket_type pk_type, bool quiet = false );
         void force_insert_item( const item &it, pocket_type pk_type );
 
         /**
