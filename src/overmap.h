@@ -25,8 +25,8 @@
 
 #include "basecamp.h"
 #include "cata_path.h"
-#include "catacharset.h"
 #include "cata_variant.h"
+#include "catacharset.h"
 #include "city.h"
 #include "colony.h"
 #include "color.h"
@@ -54,14 +54,13 @@ class JsonArray;
 class JsonObject;
 class JsonOut;
 class JsonValue;
-class cata_path;
 class character_id;
 class monster;
 class npc;
 class overmap_connection;
 struct horde_entity;
-struct pp_resolved_generator;
 struct map_data_summary;
+struct pp_resolved_generator;
 struct region_settings;
 template <typename T> struct enum_traits;
 

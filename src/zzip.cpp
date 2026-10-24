@@ -13,21 +13,20 @@
 #include <string>
 #include <system_error>
 #include <thread>
+#include <type_traits>
 #if defined(_WIN32) && !defined(_MSC_VER)
 #   include "mingw.thread.h"
 #endif
+#include <flatbuffers/flexbuffers.h>
+#include <zstd/common/mem.h>
+#include <zstd/common/xxhash.h>
+#include <zstd/zstd.h>
+#include <zstd/zstd_errors.h>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
-
-#include <flatbuffers/flexbuffers.h>
-
-#include <zstd/zstd.h>
-#include <zstd/zstd_errors.h>
-#include <zstd/common/mem.h>
-#include <zstd/common/xxhash.h>
 
 #include "filesystem.h"
 #include "flexbuffer_cache.h"
