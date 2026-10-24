@@ -191,6 +191,8 @@ void mapbuffer::save( bool delete_after_save )
     std::list<tripoint_abs_sm> submaps_to_delete;
     static constexpr std::chrono::milliseconds update_interval( 500 );
     std::chrono::steady_clock::time_point last_update = std::chrono::steady_clock::now();
+    std::vector<pending_quad> pending;
+    size_t pending_bytes = 0;
 
     for( auto &elem : submaps ) {
         std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
@@ -222,10 +224,20 @@ void mapbuffer::save( bool delete_after_save )
         bool inside_reality_bubble = here.inbounds( om_addr );
         // delete_on_save deletes everything, otherwise delete submaps
         // outside the current map.
+        const size_t num_pending = pending.size();
         save_quad( dirname, quad_path, om_addr, submaps_to_delete,
-                   delete_after_save || !inside_reality_bubble );
+                   delete_after_save || !inside_reality_bubble, pending );
+        if( pending.size() != num_pending ) {
+            pending_bytes += pending.back().data.size();
+            // Bound the memory held by serialized quads on large saves.
+            if( pending_bytes > 64 * 1024 * 1024 ) {
+                write_pending_quads( pending );
+                pending_bytes = 0;
+            }
+        }
         num_saved_submaps += 4;
     }
+    write_pending_quads( pending );
     for( auto &elem : submaps_to_delete ) {
         remove_submap( elem );
     }
@@ -233,7 +245,8 @@ void mapbuffer::save( bool delete_after_save )
 
 void mapbuffer::save_quad(
     const cata_path &dirname, const cata_path &filename, const tripoint_abs_omt &om_addr,
-    std::list<tripoint_abs_sm> &submaps_to_delete, bool delete_after_save )
+    std::list<tripoint_abs_sm> &submaps_to_delete, bool delete_after_save,
+    std::vector<pending_quad> &pending )
 {
     std::vector<point_rel_sm> offsets;
     std::vector<tripoint_abs_sm> submap_addrs;
@@ -271,15 +284,14 @@ void mapbuffer::save_quad(
 
     // A reverted uniform quad needs its old file removed, so only then does it matter
     // whether that file exists.
-    std::optional<zzip> z;
     bool file_exists = false;
     const auto open_save_file = [&]() {
         // The number of uniform submaps is so enormous that the filesystem overhead
         // for this step of just checking if the quad exists approaches 70% of the
         // total cost of saving the mapbuffer, in one test save I had.
         if( compressed ) {
-            z = zzip::load( zzip_name.get_unrelative_path(),
-                            ( PATH_INFO::world_base_save_path() / "maps.dict" ).get_unrelative_path() );
+            std::optional<zzip> z = zzip::load( zzip_name.get_unrelative_path(),
+                                                ( PATH_INFO::world_base_save_path() / "maps.dict" ).get_unrelative_path() );
             if( !z ) {
                 throw std::runtime_error( "Failed opening compressed save file " +
                                           zzip_name.get_unrelative_path().generic_u8string() );
@@ -359,35 +371,68 @@ void mapbuffer::save_quad(
             file_exist( compressed ? zzip_name : filename ) ) {
             return;
         }
-        open_save_file();
         saved_quads[saved_key] = { hash, s.size() };
     }
 
-    if( z ) {
-        z->add_file( filename.get_relative_path().filename(), s );
-    } else {
-        // Don't create the directory if it would be empty
-        assure_dir_exist( dirname );
-        write_to_file( filename, [&]( std::ostream & fout ) {
-            fout << s;
-        } );
+    if( compressed ) {
+        // Compressing is the slow part, so it is left to write_pending_quads to do
+        // for many quads at once.
+        const bool delete_after_write = all_uniform && reverted_to_uniform;
+        if( delete_after_write ) {
+            saved_quads.erase( saved_key );
+        }
+        pending.push_back( { zzip_name, filename.get_relative_path().filename(), std::move( s ), delete_after_write } );
+        return;
     }
 
+    // Don't create the directory if it would be empty
+    assure_dir_exist( dirname );
+    write_to_file( filename, [&]( std::ostream & fout ) {
+        fout << s;
+    } );
+
     if( all_uniform && reverted_to_uniform ) {
-        if( z ) {
-            z->delete_files( { filename.get_relative_path().filename() } );
-        } else {
-            std::filesystem::remove( filename.get_unrelative_path() );
-        }
+        std::filesystem::remove( filename.get_unrelative_path() );
         saved_quads.erase( saved_key );
     }
-    if( z ) {
-        cata_path tmp_path = zzip_name + ".tmp";
+}
+
+void mapbuffer::write_pending_quads( std::vector<pending_quad> &pending )
+{
+    if( pending.empty() ) {
+        return;
+    }
+    const std::filesystem::path dictionary = ( PATH_INFO::world_base_save_path() /
+            "maps.dict" ).get_unrelative_path();
+    std::vector<std::string_view> contents;
+    contents.reserve( pending.size() );
+    for( const pending_quad &quad : pending ) {
+        contents.emplace_back( quad.data );
+    }
+    const std::vector<zzip::compressed_file> files = zzip::compress_files( dictionary, contents );
+    if( files.size() != pending.size() ) {
+        throw std::runtime_error( "Failed compressing map save data" );
+    }
+    // Written in the order they were serialized, with the same steps as before
+    // compressing moved here, so the archives come out the same.
+    for( size_t i = 0; i < pending.size(); ++i ) {
+        const pending_quad &quad = pending[i];
+        std::optional<zzip> z = zzip::load( quad.zzip_name.get_unrelative_path(), dictionary );
+        if( !z ) {
+            throw std::runtime_error( "Failed opening compressed save file " +
+                                      quad.zzip_name.get_unrelative_path().generic_u8string() );
+        }
+        z->add_compressed_file( quad.file_name, files[i] );
+        if( quad.delete_after_write ) {
+            z->delete_files( { quad.file_name } );
+        }
+        cata_path tmp_path = quad.zzip_name + ".tmp";
         if( z->compact_to( tmp_path.get_unrelative_path(), 2.0 ) ) {
             z.reset();
-            rename_file( tmp_path, zzip_name );
+            rename_file( tmp_path, quad.zzip_name );
         }
     }
+    pending.clear();
 }
 
 // We're reading in way too many entities here to mess around with creating sub-objects and

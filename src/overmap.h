@@ -8,6 +8,7 @@
 #include <bitset>
 #include <climits>
 #include <cstdlib>
+#include <filesystem>
 #include <functional>
 #include <iosfwd>
 #include <iterator>
@@ -23,6 +24,7 @@
 #include <vector>
 
 #include "basecamp.h"
+#include "cata_path.h"
 #include "catacharset.h"
 #include "cata_variant.h"
 #include "city.h"
@@ -217,6 +219,14 @@ struct overmap_saved_file {
     std::string path;
     size_t hash = 0;
     size_t size = 0;
+};
+
+// Terrain that overmap::save() serialized for a compressed world, left for the caller to
+// compress and write.
+struct overmap_pending_terrain {
+    cata_path zzip_path;
+    std::filesystem::path file_name;
+    std::string data;
 };
 
 struct map_layer {
@@ -479,7 +489,11 @@ class overmap
         //TODO: extend pre-determined lake generation so we know instead of guess
         static bool guess_has_lake( const point_abs_om &p, double noise_threshold, int tile_count );
 
-        void save() const;
+        /**
+         * Writes the overmap's files, skipping those that would not change. With pending,
+         * changed terrain of a compressed world is added there instead of written.
+         */
+        void save( std::vector<overmap_pending_terrain> *pending = nullptr ) const;
 
         /**
          * @return The (local) overmap terrain coordinates of a randomly

@@ -3,17 +3,19 @@
 #define CATA_SRC_MAPBUFFER_H
 
 #include <stddef.h>
+#include <filesystem>
 #include <list>
 #include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
+#include "cata_path.h"
 #include "coordinates.h"
 
 class JsonArray;
-class cata_path;
 class submap;
 
 /**
@@ -89,10 +91,20 @@ class mapbuffer
         submap *unserialize_submaps( const tripoint_abs_sm &p );
         bool submap_file_exists( const tripoint_abs_sm &p );
         void deserialize( const JsonArray &ja );
+        // A quad save_quad serialized into a compressed save, waiting to be compressed
+        // together with others and written by write_pending_quads.
+        struct pending_quad {
+            cata_path zzip_name;
+            std::filesystem::path file_name;
+            std::string data;
+            // A reverted uniform quad is written and then deleted, to clear its old file.
+            bool delete_after_write;
+        };
         void save_quad(
             const cata_path &dirname, const cata_path &filename,
             const tripoint_abs_omt &om_addr, std::list<tripoint_abs_sm> &submaps_to_delete,
-            bool delete_after_save );
+            bool delete_after_save, std::vector<pending_quad> &pending );
+        static void write_pending_quads( std::vector<pending_quad> &pending );
         submap_map_t submaps; // NOLINT(cata-serialize)
         // Hash and size of the data save_quad last wrote for each quad, keyed by
         // file (and archive member), so unchanged quads are not written again.

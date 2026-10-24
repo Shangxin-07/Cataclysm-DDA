@@ -3826,7 +3826,7 @@ static bool save_unchanged( const std::optional<overmap_saved_file> &last,
            file_exist( path );
 }
 
-void overmap::save() const
+void overmap::save( std::vector<overmap_pending_terrain> *pending ) const
 {
     {
         const cata_path view_path = overmapbuffer::player_filename( loc );
@@ -3845,7 +3845,7 @@ void overmap::save() const
 
     std::ostringstream s;
     serialize( s );
-    const std::string data = s.str();
+    std::string data = std::move( s ).str();
     const size_t hash = std::hash<std::string> {}( data );
 
     if( world_generator->active_world->has_compression_enabled() ) {
@@ -3857,6 +3857,11 @@ void overmap::save() const
         // Keyed by archive and member, since one archive file holds this overmap's data.
         const std::string key = zzip_path.generic_u8string();
         if( save_unchanged( last_saved_terrain, key, data, hash ) ) {
+            return;
+        }
+        if( pending ) {
+            last_saved_terrain = overmap_saved_file{ key, hash, data.size() };
+            pending->push_back( { zzip_path, terfilename_path, std::move( data ) } );
             return;
         }
         std::optional<zzip> z = zzip::load( zzip_path.get_unrelative_path(),
