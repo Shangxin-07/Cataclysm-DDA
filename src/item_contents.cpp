@@ -915,6 +915,17 @@ ret_val<item *> item_contents::insert_item( const item &it,
         return ret_val<item *>::make_failure( nullptr, pocket.str() );
     }
 
+    // For these pocket types find_pocket_for only returns a pocket whose
+    // can_contain( it ) succeeded, which is the check insert_item would repeat.
+    if( !ignore_contents && ( pk_type == pocket_type::CONTAINER ||
+                              pk_type == pocket_type::MAGAZINE || pk_type == pocket_type::MAGAZINE_WELL ) ) {
+        item *inserted = pocket.value()->insert_contained_item( it );
+        if( unseal_pockets ) {
+            pocket.value()->unseal();
+        }
+        return ret_val<item *>::make_success( inserted );
+    }
+
     ret_val<item *> inserted = pocket.value()->insert_item( it, false, true, ignore_contents );
     if( inserted.success() ) {
         if( unseal_pockets ) {

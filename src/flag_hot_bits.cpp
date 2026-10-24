@@ -80,5 +80,23 @@ uint64_t hot_bit_for( const flag_id &f ) noexcept
     if( f == flag_UNBREAKABLE ) {
         return static_cast<uint64_t>( hot_flag_bit::UNBREAKABLE );
     }
+    if( f == flag_HOT ) {
+        return static_cast<uint64_t>( hot_flag_bit::HOT );
+    }
+    if( f == flag_COLD ) {
+        return static_cast<uint64_t>( hot_flag_bit::COLD );
+    }
+    if( f == flag_FROZEN ) {
+        return static_cast<uint64_t>( hot_flag_bit::FROZEN );
+    }
+    if( f == flag_MELTS ) {
+        return static_cast<uint64_t>( hot_flag_bit::MELTS );
+    }
+    if( f == flag_PROCESSING ) {
+        return static_cast<uint64_t>( hot_flag_bit::PROCESSING );
+    }
+    if( f == flag_NO_TEMP ) {
+        return static_cast<uint64_t>( hot_flag_bit::NO_TEMP );
+    }
     return 0;
 }

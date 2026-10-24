@@ -2078,7 +2078,11 @@ units::mass item::weight( bool include_contents, bool integral ) const
 
     // if this is an ammo belt add the weight of any implicitly contained linkages
     if( type->magazine && type->magazine->linkage ) {
+        // Constructing an item can draw random numbers (variants, snippets).
+        // Asking for a weight must not change what the game rolls next.
+        const cata_default_random_engine rng_saved = rng_get_engine();
         item links( *type->magazine->linkage );
+        rng_get_engine() = rng_saved;
         links.charges = ammo_remaining( );
         ret += links.weight();
     }
@@ -3191,7 +3195,8 @@ bool item::is_food_container() const
 
 bool item::has_temperature() const
 {
-    return ( is_comestible() && !has_flag( flag_NO_TEMP ) )  || is_corpse();
+    return ( is_comestible() &&
+             !( combined_hot_flags() & static_cast<uint64_t>( hot_flag_bit::NO_TEMP ) ) ) || is_corpse();
 }
 
 bool item::is_corpse() const
@@ -3360,12 +3365,15 @@ bool item::is_same_relic( item const &rhs ) const
 
 bool item::is_same_temperature( item const &rhs ) const
 {
-    return ( !has_temperature() && !rhs.has_temperature() ) ||
-           ( has_temperature() && rhs.has_temperature() &&
-             has_flag( flag_HOT ) == rhs.has_flag( flag_HOT ) &&
-             has_flag( flag_COLD ) == rhs.has_flag( flag_COLD ) &&
-             has_flag( flag_FROZEN ) == rhs.has_flag( flag_FROZEN ) &&
-             has_flag( flag_MELTS ) == rhs.has_flag( flag_MELTS ) );
+    constexpr uint64_t mask = static_cast<uint64_t>( hot_flag_bit::HOT ) |
+                              static_cast<uint64_t>( hot_flag_bit::COLD ) |
+                              static_cast<uint64_t>( hot_flag_bit::FROZEN ) |
+                              static_cast<uint64_t>( hot_flag_bit::MELTS );
+    const bool lhs_temp = has_temperature();
+    const bool rhs_temp = rhs.has_temperature();
+    return ( !lhs_temp && !rhs_temp ) ||
+           ( lhs_temp && rhs_temp &&
+             ( combined_hot_flags() & mask ) == ( rhs.combined_hot_flags() & mask ) );
 }
 
 bool item::has_relic_recharge() const

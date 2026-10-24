@@ -343,6 +343,9 @@ class item_pocket
         // tries to put an item in the pocket. returns false if failure
         ret_val<item *> insert_item( const item &it, bool into_bottom = false,
                                      bool restack_charges = true, bool ignore_contents = false );
+        // insert_item for an item can_contain( it ) already accepted, without checking again
+        item *insert_contained_item( const item &it, bool into_bottom = false,
+                                     bool restack_charges = true );
         /**
           * adds an item to the pocket with no checks
           * may create a new pocket

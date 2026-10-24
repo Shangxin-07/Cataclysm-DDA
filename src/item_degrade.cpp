@@ -429,7 +429,7 @@ bool item::goes_bad() const
     if( item_internal::goes_bad_cache_is_for( this ) ) {
         return item_internal::goes_bad_cache_fetch();
     }
-    if( has_flag( flag_PROCESSING ) ) {
+    if( combined_hot_flags() & static_cast<uint64_t>( hot_flag_bit::PROCESSING ) ) {
         return false;
     }
     if( is_corpse() ) {
@@ -1080,7 +1080,7 @@ bool item::is_broken() const
     if( combined_hot_flags() & bit ) {
         return true;
     }
-    return has_fault_flag( std::string( "ITEM_BROKEN" ) );
+    return !faults.empty() && has_fault_flag( std::string( "ITEM_BROKEN" ) );
 }
 
 bool item::is_broken_on_active() const
@@ -1089,7 +1089,7 @@ bool item::is_broken_on_active() const
     if( combined_hot_flags() & bit ) {
         return true;
     }
-    if( has_fault_flag( std::string( "ITEM_BROKEN" ) ) ) {
+    if( !faults.empty() && has_fault_flag( std::string( "ITEM_BROKEN" ) ) ) {
         return true;
     }
     return wetness && has_flag( flag_WATER_BREAK_ACTIVE );
