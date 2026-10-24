@@ -4,6 +4,7 @@
 
 #include <array>
 #include <bitset>
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
@@ -750,6 +751,20 @@ class JsonOut
 {
     private:
         std::ostream *stream;
+        // Write straight to the stream's buffer: going through ostream::put and
+        // write builds a sentry per call, which dominated serializing saves.
+        // A failed write still marks the stream bad, as put and write would.
+        void put( char c ) {
+            if( std::char_traits<char>::eq_int_type( stream->rdbuf()->sputc( c ),
+                    std::char_traits<char>::eof() ) ) {
+                stream->setstate( std::ios_base::badbit );
+            }
+        }
+        void put( const char *s, std::streamsize n ) {
+            if( stream->rdbuf()->sputn( s, n ) != n ) {
+                stream->setstate( std::ios_base::badbit );
+            }
+        }
         bool pretty_print;
         std::vector<bool> need_wrap;
         int indent_level = 0;
@@ -791,7 +806,18 @@ class JsonOut
             if( need_separator ) {
                 write_separator();
             }
-            *stream << val;
+            if constexpr( std::is_integral_v<T>&& !std::is_same_v<T, bool> &&
+                          !std::is_same_v<T, char>&& !std::is_same_v<T, signed char> &&
+                          !std::is_same_v<T, unsigned char>&& !std::is_same_v<T, wchar_t> &&
+                          !std::is_same_v<T, char16_t>&& !std::is_same_v<T, char32_t> ) {
+                // Same text as operator<< with the classic locale and decimal base set in
+                // the constructor, without the stream's formatting machinery.
+                char buf[24];
+                const std::to_chars_result res = std::to_chars( buf, buf + sizeof( buf ), val );
+                put( buf, res.ptr - buf );
+            } else {
+                *stream << val;
+            }
             need_separator = true;
         }
 
