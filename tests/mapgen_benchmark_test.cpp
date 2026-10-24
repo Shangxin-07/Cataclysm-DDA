@@ -10,7 +10,6 @@
 
 #include "avatar.h"
 #include "cata_catch.h"
-#include "colony.h"
 #include "coordinates.h"
 #include "item.h"
 #include "map.h"
