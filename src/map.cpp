@@ -1559,7 +1559,12 @@ float map::vehicle_vehicle_collision( vehicle &veh, vehicle &veh2,
 
 bool map::check_vehicle_zones( const int zlev )
 {
-    for( vehicle *veh : get_cache( zlev ).zone_vehicles ) {
+    // Vehicles register their zones on the level's cache, so a level without one has none
+    const level_cache *ch = get_cache_lazy( zlev );
+    if( ch == nullptr ) {
+        return false;
+    }
+    for( vehicle *veh : ch->zone_vehicles ) {
         if( veh->zones_dirty ) {
             return true;
         }
@@ -1570,8 +1575,12 @@ bool map::check_vehicle_zones( const int zlev )
 std::vector<zone_data *> map::get_vehicle_zones( const int zlev )
 {
     std::vector<zone_data *> veh_zones;
+    const level_cache *ch = get_cache_lazy( zlev );
+    if( ch == nullptr ) {
+        return veh_zones;
+    }
     bool rebuild = false;
-    for( vehicle *veh : get_cache( zlev ).zone_vehicles ) {
+    for( vehicle *veh : ch->zone_vehicles ) {
         if( veh->refresh_zones() ) {
             rebuild = true;
         }
@@ -6016,6 +6025,11 @@ std::pair<item *, tripoint_bub_ms> map::_add_item_or_charges( const tripoint_bub
         }
 
         support_dirty( tile );
+        // Nothing reads obj once every copy is placed
+        if( copies_remaining <= 0 )
+        {
+            return add_item( tile, std::move( obj ), copies );
+        }
         return add_item( tile, obj, copies );
     };
 
@@ -6169,9 +6183,14 @@ item &map::add_item( const tripoint_bub_ms &p, item new_item, int copies )
         set_lightmap_cache_dirty( p.z() );
     }
 
-    const map_stack::iterator new_pos = current_submap->get_items( l ).insert( new_item );
-    while( --copies > 0 ) {
-        current_submap->get_items( l ).insert( new_item );
+    map_stack::iterator new_pos;
+    if( copies == 1 ) {
+        new_pos = current_submap->get_items( l ).insert( std::move( new_item ) );
+    } else {
+        new_pos = current_submap->get_items( l ).insert( new_item );
+        while( --copies > 0 ) {
+            current_submap->get_items( l ).insert( new_item );
+        }
     }
 
     if( current_submap->active_items.add( *new_pos, l ) ) {

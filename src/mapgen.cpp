@@ -6756,24 +6756,26 @@ std::vector<item *> map::place_items(
             tries++;
         } while( is_valid_terrain( p ) && tries < 20 );
         if( tries < 20 ) {
-            auto add_res_itm = [this, &p, &res]( const item & itm ) {
-                item &it = add_item_or_charges( p, itm );
+            auto add_res_itm = [this, &p, &res]( item itm ) {
+                item &it = add_item_or_charges( p, std::move( itm ) );
                 if( !it.is_null() ) {
                     res.push_back( &it );
                 }
             };
 
-            for( const item &itm : item_group::items_from( group_id, turn, spawn_flags::use_spawn_rate ) ) {
+            for( item &itm : item_group::items_from( group_id, turn, spawn_flags::use_spawn_rate ) ) {
                 const float item_cat_spawn_rate = std::max( 0.0f, item_category_spawn_rate( itm ) );
                 if( item_cat_spawn_rate == 0.0f ) {
                     continue;
                 } else if( item_cat_spawn_rate < 1.0f ) {
                     // for items with category spawn rate less than 1, roll a dice to see if they should spawn
                     if( rng_float( 0.0f, 1.0f ) <= item_cat_spawn_rate ) {
-                        add_res_itm( itm );
+                        add_res_itm( std::move( itm ) );
                     }
+                } else if( item_cat_spawn_rate == 1.0f ) {
+                    add_res_itm( std::move( itm ) );
                 } else {
-                    // for items with category spawn rate more or equal to 1, spawn item at least one time...
+                    // for items with category spawn rate more than 1, spawn item at least one time...
                     add_res_itm( itm );
 
                     if( item_cat_spawn_rate > 1.0f ) {
@@ -7206,6 +7208,10 @@ void map::rotate( int turns )
 
                 sm->rotate( turns );
 
+                if( sm->vehicles.empty() ) {
+                    // Nothing to list, and listing would allocate this level's cache
+                    continue;
+                }
                 for( auto &veh : sm->vehicles ) {
                     veh->sm_pos = { abs_sub.xy() + p, z_level };
                 }

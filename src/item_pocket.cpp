@@ -2275,7 +2275,12 @@ ret_val<item *> item_pocket::insert_item( const item &it,
     if( !containable.success() ) {
         return ret_val<item *>::make_failure( nullptr, containable.str() );
     }
+    return ret_val<item *>::make_success( insert_contained_item( it, into_bottom, restack_charges ) );
+}
 
+item *item_pocket::insert_contained_item( const item &it, const bool into_bottom,
+        const bool restack_charges )
+{
     item *inserted = nullptr;
     if( !into_bottom ) {
         contents.push_front( it );
@@ -2293,7 +2298,7 @@ ret_val<item *> item_pocket::insert_item( const item &it,
         *bulk_fill_volume += it.volume();
         *bulk_fill_weight += it.weight();
     }
-    return ret_val<item *>::make_success( inserted );
+    return inserted;
 }
 
 std::pair<item_location, item_pocket *> item_pocket::best_pocket_in_contents(
