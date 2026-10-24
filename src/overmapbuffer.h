@@ -214,7 +214,11 @@ class overmapbuffer
          * compared with the position of the overmap.
          */
         overmap &get( const point_abs_om & );
-        void save();
+        /**
+         * Saves all overmaps. Changed terrain of a compressed world is compressed on another
+         * thread while meanwhile runs, so other saving can overlap it.
+         */
+        void save( const std::function<void()> &meanwhile = {} );
         /**
          * Just drop the generated overmaps without resetting
          * the members tracking which specials we've placed.

@@ -2,27 +2,31 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <exception>
+#include <future>
 #include <iosfwd>
 #include <memory>
 #include <optional>
 #include <string>
 #include <system_error>
 #include <thread>
+#include <type_traits>
+#if defined(_WIN32) && !defined(_MSC_VER)
+#   include "mingw.thread.h"
+#endif
+#include <flatbuffers/flexbuffers.h>
+#include <zstd/common/mem.h>
+#include <zstd/common/xxhash.h>
+#include <zstd/zstd.h>
+#include <zstd/zstd_errors.h>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
-
-#include <flatbuffers/flexbuffers.h>
-
-#include <zstd/zstd.h>
-#include <zstd/zstd_errors.h>
-#include <zstd/common/mem.h>
-#include <zstd/common/xxhash.h>
 
 #include "filesystem.h"
 #include "flexbuffer_cache.h"
@@ -85,8 +89,8 @@ struct zzip_vector_storage : flexbuffer_storage {
     }
 };
 
-// To save time, and because we aren't multithreading, we can cache zstd
-// compress and decompress contexts, indexed by dictionary path.
+// To save time we cache zstd compress and decompress contexts, indexed by dictionary
+// path. Only the main thread uses them; zzip::compress_files gives each worker its own.
 struct cached_zstd_context {
     std::vector<char> dictionary_;
     ZSTD_CCtx *cctx = nullptr;
@@ -135,6 +139,39 @@ struct cached_zstd_context {
 };
 
 std::unordered_map<std::string, cached_zstd_context> cached_contexts;
+
+// Sets up a compression context the same way for the cached contexts and for the
+// worker threads of zzip::compress_files, so both produce identical frames.
+ZSTD_CCtx *create_cctx( const std::vector<char> &dictionary )
+{
+    ZSTD_CCtx *cctx = ZSTD_createCCtx();
+    ZSTD_CCtx_setParameter( cctx, ZSTD_c_compressionLevel, 3 );
+    if( !dictionary.empty() ) {
+        ZSTD_CCtx_loadDictionary_byReference( cctx, dictionary.data(), dictionary.size() );
+    }
+    return cctx;
+}
+
+cached_zstd_context &get_cached_context( std::filesystem::path const &dictionary_path )
+{
+    std::string key = dictionary_path.generic_u8string();
+    if( auto it = cached_contexts.find( key ); it != cached_contexts.end() ) {
+        return it->second;
+    }
+    std::vector<char> dictionary;
+    if( !dictionary_path.empty() ) {
+        std::shared_ptr<const mmap_file> dictionary_file = mmap_file::map_file( dictionary_path );
+        dictionary.resize( dictionary_file->len() );
+        memcpy( dictionary.data(), dictionary_file->base(), dictionary_file->len() );
+    }
+    ZSTD_CCtx *cctx = create_cctx( dictionary );
+    ZSTD_DCtx *dctx = ZSTD_createDCtx();
+    if( !dictionary.empty() ) {
+        ZSTD_DCtx_loadDictionary_byReference( dctx, dictionary.data(), dictionary.size() );
+    }
+    // The contexts reference the dictionary's buffer, which moving the vector keeps.
+    return cached_contexts.emplace( std::move( key ), cached_zstd_context{ std::move( dictionary ), cctx, dctx } ).first->second;
+}
 
 } // namespace
 
@@ -406,28 +443,9 @@ std::optional<zzip> zzip::load(
     std::optional<zzip> ret{ std::in_place, zzip{std::move( file ), std::move( footer )} };
     zzip &zip = ret.value();
 
-    ZSTD_CCtx *cctx;
-    ZSTD_DCtx *dctx;
-    if( auto it = cached_contexts.find( dictionary_path.generic_u8string() );
-        it != cached_contexts.end() ) {
-        cctx = it->second.cctx;
-        dctx = it->second.dctx;
-    } else {
-        cctx = ZSTD_createCCtx();
-        ZSTD_CCtx_setParameter( cctx, ZSTD_c_compressionLevel, 3 );
-        dctx = ZSTD_createDCtx();
-
-        std::vector<char> dictionary;
-        if( !dictionary_path.empty() ) {
-            std::shared_ptr<const mmap_file> dictionary_file = mmap_file::map_file( dictionary_path );
-            dictionary.resize( dictionary_file->len() );
-            memcpy( dictionary.data(), dictionary_file->base(), dictionary_file->len() );
-            ZSTD_CCtx_loadDictionary_byReference( cctx, dictionary.data(), dictionary.size() );
-            ZSTD_DCtx_loadDictionary_byReference( dctx, dictionary.data(), dictionary.size() );
-        }
-
-        cached_contexts.emplace( dictionary_path.generic_u8string(), cached_zstd_context{ std::move( dictionary ), cctx, dctx } );
-    }
+    cached_zstd_context &cached = get_cached_context( dictionary_path );
+    ZSTD_CCtx *cctx = cached.cctx;
+    ZSTD_DCtx *dctx = cached.dctx;
 
     if( needs_footer && !zip.rewrite_footer() ) {
         ret.reset();
@@ -440,7 +458,85 @@ std::optional<zzip> zzip::load(
 
 bool zzip::add_file( std::filesystem::path const &zzip_relative_path, std::string_view content )
 {
-    size_t estimated_size = ZSTD_compressBound( content.length() );
+    return append_file( zzip_relative_path, content, content.size(), false );
+}
+
+bool zzip::add_compressed_file( std::filesystem::path const &zzip_relative_path,
+                                const compressed_file &compressed )
+{
+    return append_file( zzip_relative_path, compressed.frame, compressed.content_size, true );
+}
+
+namespace
+{
+
+std::vector<zzip::compressed_file> compress_with_dictionary( const std::vector<char> &dictionary,
+        const std::vector<std::string_view> &contents )
+{
+    std::vector<zzip::compressed_file> files( contents.size() );
+    std::atomic<size_t> next_index{ 0 };
+    std::atomic<bool> failed{ false };
+    // Each thread takes the next uncompressed content until none are left.
+    const auto worker = [&]() {
+        ZSTD_CCtx *cctx = create_cctx( dictionary );
+        for( size_t i = next_index++; i < contents.size(); i = next_index++ ) {
+            files[i].content_size = contents[i].size();
+            std::string &frame = files[i].frame;
+            frame.resize( ZSTD_compressBound( contents[i].size() ) );
+            const size_t size = ZSTD_compress2( cctx, frame.data(), frame.size(), contents[i].data(),
+                                                contents[i].size() );
+            if( ZSTD_isError( size ) ) {
+                failed = true;
+                break;
+            }
+            frame.resize( size );
+        }
+        ZSTD_freeCCtx( cctx );
+    };
+    const size_t num_threads = std::min<size_t>( { contents.size(), std::max( 1U, std::thread::hardware_concurrency() ), 8 } );
+    std::vector<std::thread> threads;
+    for( size_t i = 1; i < num_threads; ++i ) {
+        try {
+            threads.emplace_back( worker );
+        } catch( const std::system_error & ) {
+            // Fewer threads still get through every content.
+            break;
+        }
+    }
+    worker();
+    for( std::thread &thread : threads ) {
+        thread.join();
+    }
+    if( failed ) {
+        files.clear();
+    }
+    return files;
+}
+
+} // namespace
+
+std::vector<zzip::compressed_file> zzip::compress_files( std::filesystem::path const
+        &dictionary_path,
+        const std::vector<std::string_view> &contents )
+{
+    return compress_with_dictionary( get_cached_context( dictionary_path ).dictionary_, contents );
+}
+
+std::future<std::vector<zzip::compressed_file>> zzip::compress_files_async(
+            std::filesystem::path const &dictionary_path, std::vector<std::string_view> contents )
+{
+    // The context cache is only touched here, on the calling thread. Its entries stay put
+    // when it grows, so the dictionary can be read from the other thread meanwhile.
+    const std::vector<char> &dictionary = get_cached_context( dictionary_path ).dictionary_;
+    return std::async( std::launch::async, [&dictionary, contents = std::move( contents )]() {
+        return compress_with_dictionary( dictionary, contents );
+    } );
+}
+
+bool zzip::append_file( std::filesystem::path const &zzip_relative_path, std::string_view content,
+                        size_t content_size, bool content_is_compressed )
+{
+    size_t estimated_size = ZSTD_compressBound( content_size );
 
     JsonObject footer_copy = copy_footer();
     footer_copy.allow_omitted_members();
@@ -463,7 +559,8 @@ bool zzip::add_file( std::filesystem::path const &zzip_relative_path, std::strin
         return false;
     }
 
-    size_t final_size = write_file_at( relative_path_string, content, old_content_end );
+    size_t final_size = write_file_at( relative_path_string, content, old_content_end, std::nullopt,
+                                       content_is_compressed );
 
     if( ZSTD_isError( final_size ) ) {
         return false;
@@ -697,7 +794,7 @@ size_t zzip::ensure_capacity_for( size_t bytes )
 
 // Actually performs the compression and encoding of a file into the zzip.
 size_t zzip::write_file_at( std::string_view filename, std::string_view content, size_t offset,
-                            std::optional<uint64_t> force_checksum )
+                            std::optional<uint64_t> force_checksum, bool content_is_compressed )
 {
     // The format of a compressed entry is a series of zstd frames.
     // There are an unbounded number of leading skippable frames of unspecified content.
@@ -725,15 +822,25 @@ size_t zzip::write_file_at( std::string_view filename, std::string_view content,
     offset += header_size;
     // Make room for the checksum frame before the file.
     offset += kEntryChecksumFrameSize;
-    size_t file_size = ZSTD_compress2(
-                           ctx_->cctx,
-                           file_base_plus( offset ),
-                           file_capacity_at( offset ),
-                           content.data(),
-                           content.size()
-                       );
-    if( ZSTD_isError( file_size ) ) {
-        return file_size;
+    size_t file_size;
+    if( content_is_compressed ) {
+        // A frame from compress_files, already in its final form.
+        if( file_capacity_at( offset ) < content.size() ) {
+            return static_cast<size_t>( -static_cast<std::ptrdiff_t>( ZSTD_error_dstSize_tooSmall ) );
+        }
+        memcpy( file_base_plus( offset ), content.data(), content.size() );
+        file_size = content.size();
+    } else {
+        file_size = ZSTD_compress2(
+                        ctx_->cctx,
+                        file_base_plus( offset ),
+                        file_capacity_at( offset ),
+                        content.data(),
+                        content.size()
+                    );
+        if( ZSTD_isError( file_size ) ) {
+            return file_size;
+        }
     }
     uint64_t checksum = 0;
     if( force_checksum.has_value() ) {
