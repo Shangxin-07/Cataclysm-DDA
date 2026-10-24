@@ -2,9 +2,13 @@
 #ifndef CATA_SRC_MAPBUFFER_H
 #define CATA_SRC_MAPBUFFER_H
 
+#include <stddef.h>
 #include <list>
 #include <map>
 #include <memory>
+#include <string>
+#include <unordered_map>
+#include <utility>
 
 #include "coordinates.h"
 
@@ -90,6 +94,9 @@ class mapbuffer
             const tripoint_abs_omt &om_addr, std::list<tripoint_abs_sm> &submaps_to_delete,
             bool delete_after_save );
         submap_map_t submaps; // NOLINT(cata-serialize)
+        // Hash and size of the data save_quad last wrote for each quad, keyed by
+        // file (and archive member), so unchanged quads are not written again.
+        std::unordered_map<std::string, std::pair<size_t, size_t>> saved_quads; // NOLINT(cata-serialize)
 };
 
 extern mapbuffer MAPBUFFER;

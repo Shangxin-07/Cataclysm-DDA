@@ -1,16 +1,21 @@
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <ratio>
+#include <sstream>
 #include <string>
+#include <vector>
 
 #include "avatar.h"
 #include "calendar.h"
 #include "cata_catch.h"
 #include "cata_path.h"
+#include "cata_utility.h"
 #include "character_id.h"
 #include "coordinates.h"
 #include "creature.h"
@@ -20,6 +25,7 @@
 #include "map_scale_constants.h"
 #include "monster.h"
 #include "npc.h"
+#include "overmap.h"
 #include "overmapbuffer.h"
 #include "path_info.h"
 #include "player_helpers.h"
@@ -28,6 +34,8 @@
 #include "turn_profiler.h"
 #include "type_id.h"
 #include "vpart_position.h"
+#include "worldfactory.h"
+#include "zzip.h"
 
 static const efftype_id effect_sleep( "sleep" );
 
@@ -43,6 +51,42 @@ static const trait_id trait_DEBUG_NOTEMP( "DEBUG_NOTEMP" );
 // Run with: tests/cata_test "[turn_benchmark]"
 // Tune with env BENCH_TURNS, BENCH_MONSTERS, BENCH_NPCS, BENCH_SEED, BENCH_PREGEN.
 // BENCH_SAVES=N also times N full saves after the turns.
+// BENCH_VERIFY_SAVES=1 checks after each save that every loaded overmap's files hold
+// exactly what serializing it now produces.
+
+// Number of overmap files whose saved contents differ from the overmap's current data.
+static int count_stale_overmap_files()
+{
+    int stale = 0;
+    const point_abs_om center = project_to<coords::om>( get_avatar().pos_abs_omt().xy() );
+    for( const point_abs_om &p : closest_points_first( center, 20 ) ) {
+        overmap *om = overmap_buffer.get_existing( p );
+        if( om == nullptr ) {
+            continue;
+        }
+        std::ostringstream view;
+        om->serialize_view( view );
+        if( read_whole_file( overmapbuffer::player_filename( om->pos() ) ) != view.str() ) {
+            ++stale;
+        }
+        std::ostringstream ter;
+        om->serialize( ter );
+        const std::string terfilename = overmapbuffer::terrain_filename( om->pos() );
+        const cata_path zzip_path = PATH_INFO::current_dimension_save_path() /
+                                    zzip_overmap_directory / terfilename + zzip_suffix;
+        std::optional<zzip> z = zzip::load( zzip_path.get_unrelative_path(),
+                                            ( PATH_INFO::world_base_save_path() / "overmaps.dict" ).get_unrelative_path() );
+        std::string saved;
+        if( z ) {
+            const std::vector<std::byte> bytes = z->get_file( std::filesystem::u8path( terfilename ) );
+            saved.assign( reinterpret_cast<const char *>( bytes.data() ), bytes.size() );
+        }
+        if( saved != ter.str() ) {
+            ++stale;
+        }
+    }
+    return stale;
+}
 static int env_int( const char *name, int fallback )
 {
     const char *v = std::getenv( name );
@@ -161,6 +205,11 @@ TEST_CASE( "turn_throughput_city", "[.][turn_benchmark]" )
         const std::chrono::steady_clock::time_point s1 = std::chrono::steady_clock::now();
         std::printf( "save_benchmark: save %d took %.1f ms\n", i,
                      std::chrono::duration<double, std::milli>( s1 - s0 ).count() );
+        if( env_int( "BENCH_VERIFY_SAVES", 0 ) ) {
+            const int stale = count_stale_overmap_files();
+            std::printf( "save_benchmark: %d stale overmap files\n", stale );
+            CHECK( stale == 0 );
+        }
         u.set_moves( 0 );
         g->do_turn();
     }

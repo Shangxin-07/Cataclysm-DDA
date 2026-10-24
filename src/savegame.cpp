@@ -1313,8 +1313,8 @@ void overmap::serialize( std::ostream &fout ) const
     json.member( "map_data" );
     json.start_array();
     for( int z = 0; z < OVERMAP_LAYERS; ++z ) {
-        if( !layer[z].map_cache ) {
-            // Never written, so every entry is the default placeholder.
+        if( layer[z].real_map_data == 0 ) {
+            // Only placeholders, which are not saved.
             continue;
         }
         for( tripoint_om_omt entry_location{ 0, 0, z - OVERMAP_HEIGHT };

@@ -321,6 +321,7 @@ void overmap::init_layers()
         l.visible.fill( om_vision_level::unseen );
         l.explored.fill( false );
         l.map_cache.reset();
+        l.real_map_data = 0;
     }
 }
 
@@ -850,7 +851,11 @@ void overmap::map_cache_set( const tripoint_om_omt &p, std::shared_ptr<map_data_
         l.map_cache = std::make_unique<cata::mdarray<std::shared_ptr<map_data_summary>, point_om_omt>>();
         l.map_cache->fill( default_map_cache_entry );
     }
-    ( *l.map_cache )[p.xy()] = std::move( value );
+    std::shared_ptr<map_data_summary> &slot = ( *l.map_cache )[p.xy()];
+    const bool was_real = slot && !slot->placeholder;
+    const bool is_real = value && !value->placeholder;
+    l.real_map_data += static_cast<int>( is_real ) - static_cast<int>( was_real );
+    slot = std::move( value );
 }
 
 // For internal use only, just overwrite the pointer.
@@ -3812,11 +3817,36 @@ void overmap::open( overmap_special_batch &enabled_specials )
 }
 
 // Note: this may throw io errors from std::ofstream
+// True when the file at path already holds exactly what save() last wrote there and
+// that is also what we are about to write.
+static bool save_unchanged( const std::optional<overmap_saved_file> &last,
+                            const std::string &path, const std::string &data, size_t hash )
+{
+    return last && last->path == path && last->size == data.size() && last->hash == hash &&
+           file_exist( path );
+}
+
 void overmap::save() const
 {
-    write_to_file( overmapbuffer::player_filename( loc ), [&]( std::ostream & stream ) {
-        serialize_view( stream );
-    } );
+    {
+        const cata_path view_path = overmapbuffer::player_filename( loc );
+        const std::string path = view_path.generic_u8string();
+        std::ostringstream view;
+        serialize_view( view );
+        const std::string data = view.str();
+        const size_t hash = std::hash<std::string> {}( data );
+        if( !save_unchanged( last_saved_view, path, data, hash ) ) {
+            write_to_file( view_path, [&]( std::ostream & stream ) {
+                stream << data;
+            } );
+            last_saved_view = overmap_saved_file{ path, hash, data.size() };
+        }
+    }
+
+    std::ostringstream s;
+    serialize( s );
+    const std::string data = s.str();
+    const size_t hash = std::hash<std::string> {}( data );
 
     if( world_generator->active_world->has_compression_enabled() ) {
         const std::string terfilename = overmapbuffer::terrain_filename( loc );
@@ -3824,6 +3854,11 @@ void overmap::save() const
         const cata_path overmaps_folder = PATH_INFO::current_dimension_save_path() / zzip_overmap_directory;
         assure_dir_exist( overmaps_folder );
         const cata_path zzip_path = overmaps_folder / terfilename_path + zzip_suffix;
+        // Keyed by archive and member, since one archive file holds this overmap's data.
+        const std::string key = zzip_path.generic_u8string();
+        if( save_unchanged( last_saved_terrain, key, data, hash ) ) {
+            return;
+        }
         std::optional<zzip> z = zzip::load( zzip_path.get_unrelative_path(),
                                             ( PATH_INFO::world_base_save_path() / "overmaps.dict" ).get_unrelative_path()
                                           );
@@ -3836,10 +3871,7 @@ void overmap::save() const
             );
         }
 
-        std::stringstream s;
-        serialize( s );
-
-        if( !z->add_file( terfilename_path, s.str() ) ) {
+        if( !z->add_file( terfilename_path, data ) ) {
             throw std::runtime_error( string_format( "Failed to save omap %d.%d to %s", loc.x(),
                                       loc.y(), zzip_path.get_unrelative_path().generic_u8string().c_str() ) );
         }
@@ -3848,13 +3880,18 @@ void overmap::save() const
             z.reset();
             rename_file( tmp_path, zzip_path );
         }
+        last_saved_terrain = overmap_saved_file{ key, hash, data.size() };
     } else {
-        write_to_file( PATH_INFO::current_dimension_save_path() /
-                       overmapbuffer::terrain_filename(
-                           loc ), [&](
-        std::ostream & stream ) {
-            serialize( stream );
+        const cata_path ter_path = PATH_INFO::current_dimension_save_path() /
+                                   overmapbuffer::terrain_filename( loc );
+        const std::string path = ter_path.generic_u8string();
+        if( save_unchanged( last_saved_terrain, path, data, hash ) ) {
+            return;
+        }
+        write_to_file( ter_path, [&]( std::ostream & stream ) {
+            stream << data;
         } );
+        last_saved_terrain = overmap_saved_file{ path, hash, data.size() };
     }
 }
 
