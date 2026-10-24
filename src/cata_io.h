@@ -4,6 +4,7 @@
 
 #include <functional>
 #include <string>
+#include <string_view>
 #include <type_traits>
 
 #include "json.h"
@@ -410,19 +411,19 @@ class JsonObjectOutputArchive
             return false;
         }
         template<typename T>
-        bool io( const std::string &name, const T &value, const T &default_value ) {
+        bool io( const std::string_view name, const T &value, const T &default_value ) {
             if( value == default_value ) {
                 return false;
             }
             return io( name, value );
         }
         template<typename T>
-        bool io( const std::string &name, const T &value, default_tag ) {
+        bool io( const std::string_view name, const T &value, default_tag ) {
             static const T default_value = T();
             return io<T>( name, value, default_value );
         }
         template<typename T>
-        bool io( const std::string &name, const T &value, empty_default_tag ) {
+        bool io( const std::string_view name, const T &value, empty_default_tag ) {
             if( !value.empty() ) {
                 io<T>( name, value );
             }
@@ -439,12 +440,12 @@ class JsonObjectOutputArchive
          * @ref JsonObjectInputArchive, so it can be used when the archive type is a template parameter.
          */
         template<typename T>
-        bool io( const std::string &name, const T *pointer,
+        bool io( const std::string_view name, const T *pointer,
                  const std::function<void( const std::string & )> &,
                  const std::function<std::string( const T & )> &save, bool required = false ) {
             if( pointer == nullptr ) {
                 if( required ) {
-                    throw JsonError( "a required member is null: " + name );
+                    throw JsonError( "a required member is null: " + std::string( name ) );
                 }
                 return false;
             }
@@ -454,19 +455,19 @@ class JsonObjectOutputArchive
          * The I-give-up load function for gun variants
          */
         template<typename T, typename LoadFunc, typename SaveFunc>
-        bool io( const std::string &name, const T &pointer,
+        bool io( const std::string_view name, const T &pointer,
                  const LoadFunc &,
                  const SaveFunc &save, bool required = false ) {
             if( pointer == nullptr ) {
                 if( required ) {
-                    throw JsonError( "a required member is null: " + name );
+                    throw JsonError( "a required member is null: " + std::string( name ) );
                 }
                 return false;
             }
             return io( name, save( pointer ) );
         }
         template<typename T>
-        bool io( const std::string &name, const T *pointer,
+        bool io( const std::string_view name, const T *pointer,
                  const std::function<void( const std::string & )> &load,
                  const std::function<std::string( const T & )> &save, required_tag ) {
             return io<T>( name, pointer, load, save, true );
