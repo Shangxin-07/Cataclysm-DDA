@@ -149,7 +149,7 @@ TEST_CASE( "zzip_compress_files_matches_add_file", "[zzip]" )
     for( int i = 0; i < 40; ++i ) {
         std::string text;
         for( int j = 0; j <= i * 50; ++j ) {
-            text += "{\"id\":" + std::to_string( j % ( i + 3 ) ) + ",\"name\":\"item\"},";
+            text += R"({"id":)" + std::to_string( j % ( i + 3 ) ) + R"(,"name":"item"},)";
         }
         contents.push_back( std::move( text ) );
     }
