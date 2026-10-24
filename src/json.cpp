@@ -2250,7 +2250,9 @@ void JsonOut::seek( int pos )
 
 void JsonOut::write_indent()
 {
-    std::fill_n( std::ostream_iterator<char>( *stream ), indent_level * 2, ' ' );
+    for( int i = 0; i < indent_level * 2; ++i ) {
+        put( ' ' );
+    }
 }
 
 void JsonOut::write_separator()
@@ -2258,15 +2260,15 @@ void JsonOut::write_separator()
     if( !need_separator ) {
         return;
     }
-    stream->put( ',' );
+    put( ',' );
     if( pretty_print ) {
         // Wrap after separator between objects and between members of top-level objects.
         if( indent_level < 2 || need_wrap.back() ) {
-            stream->put( '\n' );
+            put( '\n' );
             write_indent();
         } else {
             // Otherwise pad after commas.
-            stream->put( ' ' );
+            put( ' ' );
         }
     }
     need_separator = false;
@@ -2275,9 +2277,9 @@ void JsonOut::write_separator()
 void JsonOut::write_member_separator()
 {
     if( pretty_print ) {
-        stream->write( ": ", 2 );
+        put( ": ", 2 );
     } else {
-        stream->put( ':' );
+        put( ':' );
     }
     need_separator = false;
 }
@@ -2288,11 +2290,11 @@ void JsonOut::start_pretty()
         indent_level += 1;
         // Wrap after top level object and array opening.
         if( indent_level < 2 || need_wrap.back() ) {
-            stream->put( '\n' );
+            put( '\n' );
             write_indent();
         } else {
             // Otherwise pad after opening.
-            stream->put( ' ' );
+            put( ' ' );
         }
     }
 }
@@ -2304,11 +2306,11 @@ void JsonOut::end_pretty()
         // Wrap after ending top level array and object.
         // Also wrap in the special case of exiting an array containing an object.
         if( indent_level < 1 || need_wrap.back() ) {
-            stream->put( '\n' );
+            put( '\n' );
             write_indent();
         } else {
             // Otherwise pad after ending.
-            stream->put( ' ' );
+            put( ' ' );
         }
     }
 }
@@ -2318,7 +2320,7 @@ void JsonOut::start_object( bool wrap )
     if( need_separator ) {
         write_separator();
     }
-    stream->put( '{' );
+    put( '{' );
     need_wrap.push_back( wrap );
     start_pretty();
     need_separator = false;
@@ -2328,7 +2330,7 @@ void JsonOut::end_object()
 {
     end_pretty();
     need_wrap.pop_back();
-    stream->put( '}' );
+    put( '}' );
     need_separator = true;
 }
 
@@ -2337,7 +2339,7 @@ void JsonOut::start_array( bool wrap )
     if( need_separator ) {
         write_separator();
     }
-    stream->put( '[' );
+    put( '[' );
     need_wrap.push_back( wrap );
     start_pretty();
     need_separator = false;
@@ -2347,7 +2349,7 @@ void JsonOut::end_array()
 {
     end_pretty();
     need_wrap.pop_back();
-    stream->put( ']' );
+    put( ']' );
     need_separator = true;
 }
 
@@ -2356,7 +2358,7 @@ void JsonOut::write_null()
     if( need_separator ) {
         write_separator();
     }
-    stream->write( "null", 4 );
+    put( "null", 4 );
     need_separator = true;
 }
 
@@ -2365,14 +2367,14 @@ void JsonOut::write( std::string_view val )
     if( need_separator ) {
         write_separator();
     }
-    stream->put( '"' );
+    put( '"' );
     // Copy runs of characters that need no escaping in one write; put() per
     // character goes through a stream sentry each time.
     const char *run_start = val.data();
     const char *const end = val.data() + val.size();
     const auto flush_run = [&]( const char *run_end ) {
         if( run_end != run_start ) {
-            stream->write( run_start, run_end - run_start );
+            put( run_start, run_end - run_start );
         }
     };
     for( const char *p = val.data(); p != end; ++p ) {
@@ -2383,33 +2385,33 @@ void JsonOut::write( std::string_view val )
         flush_run( p );
         run_start = p + 1;
         if( ch == '"' ) {
-            stream->write( "\\\"", 2 );
+            put( "\\\"", 2 );
         } else if( ch == '\\' ) {
-            stream->write( "\\\\", 2 );
+            put( "\\\\", 2 );
         } else if( ch == '\b' ) {
-            stream->write( "\\b", 2 );
+            put( "\\b", 2 );
         } else if( ch == '\f' ) {
-            stream->write( "\\f", 2 );
+            put( "\\f", 2 );
         } else if( ch == '\n' ) {
-            stream->write( "\\n", 2 );
+            put( "\\n", 2 );
         } else if( ch == '\r' ) {
-            stream->write( "\\r", 2 );
+            put( "\\r", 2 );
         } else if( ch == '\t' ) {
-            stream->write( "\\t", 2 );
+            put( "\\t", 2 );
         } else {
             // convert to "\uxxxx" unicode escape
-            stream->write( "\\u00", 4 );
-            stream->put( ( ch < 0x10 ) ? '0' : '1' );
+            put( "\\u00", 4 );
+            put( ( ch < 0x10 ) ? '0' : '1' );
             char remainder = ch & 0x0F;
             if( remainder < 0x0A ) {
-                stream->put( '0' + remainder );
+                put( '0' + remainder );
             } else {
-                stream->put( 'A' + ( remainder - 0x0A ) );
+                put( 'A' + ( remainder - 0x0A ) );
             }
         }
     }
     flush_run( end );
-    stream->put( '"' );
+    put( '"' );
     need_separator = true;
 }
 
@@ -2420,12 +2422,12 @@ void JsonOut::write( const std::bitset<N> &b )
         write_separator();
     }
     std::string converted = b.to_string();
-    stream->put( '"' );
+    put( '"' );
     for( char &i : converted ) {
         unsigned char ch = i;
-        stream->put( ch );
+        put( ch );
     }
-    stream->put( '"' );
+    put( '"' );
     need_separator = true;
 }
 
