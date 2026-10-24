@@ -2078,11 +2078,7 @@ units::mass item::weight( bool include_contents, bool integral ) const
 
     // if this is an ammo belt add the weight of any implicitly contained linkages
     if( type->magazine && type->magazine->linkage ) {
-        // Constructing an item can draw random numbers (variants, snippets).
-        // Asking for a weight must not change what the game rolls next.
-        const cata_default_random_engine rng_saved = rng_get_engine();
         item links( *type->magazine->linkage );
-        rng_get_engine() = rng_saved;
         links.charges = ammo_remaining( );
         ret += links.weight();
     }

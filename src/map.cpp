@@ -6183,11 +6183,14 @@ item &map::add_item( const tripoint_bub_ms &p, item new_item, int copies )
         set_lightmap_cache_dirty( p.z() );
     }
 
-    const map_stack::iterator new_pos = copies == 1 ?
-                                        current_submap->get_items( l ).insert( std::move( new_item ) ) :
-                                        current_submap->get_items( l ).insert( new_item );
-    while( --copies > 0 ) {
-        current_submap->get_items( l ).insert( new_item );
+    map_stack::iterator new_pos;
+    if( copies == 1 ) {
+        new_pos = current_submap->get_items( l ).insert( std::move( new_item ) );
+    } else {
+        new_pos = current_submap->get_items( l ).insert( new_item );
+        while( --copies > 0 ) {
+            current_submap->get_items( l ).insert( new_item );
+        }
     }
 
     if( current_submap->active_items.add( *new_pos, l ) ) {
