@@ -630,24 +630,7 @@ namespace
 
 bool _stacks_whiteblacklist( item const &lhs, item const &rhs )
 {
-    bool wbl = false;
-    if( lhs.get_contents().size() == rhs.get_contents().size() ) {
-        std::vector<item_pocket const *> const lpkts = lhs.get_container_pockets();
-        std::vector<item_pocket const *> const rpkts = rhs.get_container_pockets();
-        if( lpkts.size() == rpkts.size() ) {
-            wbl = true;
-            for( std::size_t i = 0; i < lpkts.size(); i++ ) {
-                wbl &= lpkts[i]->settings.get_item_whitelist() == rpkts[i]->settings.get_item_whitelist() &&
-                       lpkts[i]->settings.get_item_blacklist() == rpkts[i]->settings.get_item_blacklist() &&
-                       lpkts[i]->settings.get_category_whitelist() == rpkts[i]->settings.get_category_whitelist() &&
-                       lpkts[i]->settings.get_category_blacklist() == rpkts[i]->settings.get_category_blacklist();
-                if( !wbl ) {
-                    break;
-                }
-            }
-        }
-    }
-    return wbl;
+    return lhs.get_contents().same_container_lists( rhs.get_contents() );
 }
 
 bool _stacks_weapon_mods( item const &lhs, item const &rhs )
@@ -808,6 +791,12 @@ bool _stacks_ups( item const &lhs, item const &rhs )
 
 bool _stacks_mods( item const &lhs, item const &rhs )
 {
+    if( lhs.is_armor() && rhs.is_armor() && lhs.has_clothing_mod() != rhs.has_clothing_mod() ) {
+        return false;
+    }
+    if( !lhs.get_contents().has_mod_items() && !rhs.get_contents().has_mod_items() ) {
+        return true;
+    }
     const std::vector<const item *> this_mods = lhs.mods();
     const std::vector<const item *> that_mods = rhs.mods();
     if( lhs.is_armor() && rhs.is_armor() && lhs.has_clothing_mod() != rhs.has_clothing_mod() ) {
@@ -915,7 +904,8 @@ stacking_info item::stacks_with( const item &rhs, bool check_components, bool co
     bits.set( tname::segments::FAULTS, faults == rhs.faults );
     bits.set( tname::segments::FAULTS_SUFFIX, faults == rhs.faults );
     bits.set( tname::segments::TECHNIQUES, techniques == rhs.techniques );
-    bits.set( tname::segments::OVERHEAT, overheat_symbol() == rhs.overheat_symbol() );
+    bits.set( tname::segments::OVERHEAT, ( ( !is_gun() && !rhs.is_gun() ) ||
+                                           overheat_symbol() == rhs.overheat_symbol() ) );
     bits.set( tname::segments::DIRT,
               both_empty_vars || get_var( "dirt", 0 ) == rhs.get_var( "dirt", 0 ) );
     bits.set( tname::segments::SEALED, all_pockets_sealed() == rhs.all_pockets_sealed() );

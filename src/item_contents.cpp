@@ -2060,6 +2060,46 @@ bool item_contents::allows_speedloader( const itype_id &speedloader_id ) const
     return false;
 }
 
+bool item_contents::has_mod_items() const
+{
+    for( const item_pocket &pocket : contents ) {
+        if( pocket.is_type( pocket_type::MOD ) && !pocket.empty() ) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool item_contents::same_container_lists( const item_contents &rhs ) const
+{
+    if( contents.size() != rhs.contents.size() ) {
+        return false;
+    }
+    auto next_container = []( std::list<item_pocket>::const_iterator it,
+    const std::list<item_pocket>::const_iterator & end ) {
+        while( it != end && !it->is_type( pocket_type::CONTAINER ) ) {
+            ++it;
+        }
+        return it;
+    };
+    std::list<item_pocket>::const_iterator l = next_container( contents.begin(), contents.end() );
+    std::list<item_pocket>::const_iterator r = next_container( rhs.contents.begin(),
+            rhs.contents.end() );
+    while( l != contents.end() && r != rhs.contents.end() ) {
+        const item_pocket::favorite_settings &ls = l->settings;
+        const item_pocket::favorite_settings &rs = r->settings;
+        if( ls.get_item_whitelist() != rs.get_item_whitelist() ||
+            ls.get_item_blacklist() != rs.get_item_blacklist() ||
+            ls.get_category_whitelist() != rs.get_category_whitelist() ||
+            ls.get_category_blacklist() != rs.get_category_blacklist() ) {
+            return false;
+        }
+        l = next_container( std::next( l ), contents.end() );
+        r = next_container( std::next( r ), rhs.contents.end() );
+    }
+    return l == contents.end() && r == rhs.contents.end();
+}
+
 std::vector<const item *> item_contents::mods() const
 {
     std::vector<const item *> mods;

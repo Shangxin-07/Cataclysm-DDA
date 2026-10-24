@@ -239,6 +239,12 @@ class item_pocket
         // `it.charges_per_weight( pocket.remaining_weight() )`
         int charges_per_remaining_volume( const item &it ) const;
         int charges_per_remaining_weight( const item &it ) const;
+        // both of the above in one pass over the contents, as {volume, weight};
+        // a side that isn't needed is returned as INT_MAX
+        std::pair<int, int> charges_per_remaining_volume_weight( const item &it,
+                bool need_volume = true, bool need_weight = true ) const;
+        // min of charges_per_remaining_volume and charges_per_remaining_weight
+        int charges_per_remaining_space( const item &it ) const;
 
         units::volume item_size_modifier() const;
         units::mass item_weight_modifier() const;

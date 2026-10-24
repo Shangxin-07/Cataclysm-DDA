@@ -1,6 +1,7 @@
 #include "item_pocket.h"
 
 #include <algorithm>
+#include <climits>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -613,19 +614,12 @@ int item_pocket::remaining_capacity_for_item( const item &it ) const
         item it_copy = it;
         it_copy.charges = 1;
         if( can_contain( it_copy ).success() ) {
-            return std::min( {
-                it.charges,
-                charges_per_remaining_volume( it ),
-                charges_per_remaining_weight( it )
-            } );
+            return std::min( it.charges, charges_per_remaining_space( it ) );
         } else {
             return 0;
         }
     } else if( can_contain( it ).success() ) {
-        return std::min( {
-            charges_per_remaining_volume( it ),
-            charges_per_remaining_weight( it )
-        } );
+        return charges_per_remaining_space( it );
     } else {
         return 0;
     }
@@ -1627,10 +1621,10 @@ ret_val<item_pocket::contain_code> item_pocket::_can_contain( const item &it,
     }
 
     int fallback_capacity = it.count_by_charges() ? it.charges : copies_remaining;
-    int copy_weight_capacity = weight <= 0_gram ? fallback_capacity :
-                               charges_per_remaining_weight( it );
-    int copy_volume_capacity = volume <= 0_ml ? fallback_capacity :
-                               charges_per_remaining_volume( it );
+    const std::pair<int, int> remaining = charges_per_remaining_volume_weight( it, volume > 0_ml,
+                                          weight > 0_gram );
+    int copy_weight_capacity = weight <= 0_gram ? fallback_capacity : remaining.second;
+    int copy_volume_capacity = volume <= 0_ml ? fallback_capacity : remaining.first;
 
     if( copy_weight_capacity < it.count() ) {
         return ret_val<item_pocket::contain_code>::make_failure(
@@ -2238,10 +2232,8 @@ int item_pocket::fill_with( const item &contained, Character &guy, int amount,
         contained_item.charges = std::min( amount - num_contained,
                                            remaining_ammo_capacity( ammo ) );
     } else {
-        contained_item.charges = std::min( { amount - num_contained,
-                                             charges_per_remaining_volume( contained_item ),
-                                             charges_per_remaining_weight( contained_item )
-                                           } );
+        contained_item.charges = std::min( amount - num_contained,
+                                           charges_per_remaining_space( contained_item ) );
     }
     if( contained_item.charges == 0 ) {
         return 0;
@@ -2468,6 +2460,39 @@ int item_pocket::charges_per_remaining_weight( const item &it ) const
         }
     }
     return it.charges_per_weight( non_it_weight, true ) - contained_charges;
+}
+
+std::pair<int, int> item_pocket::charges_per_remaining_volume_weight( const item &it,
+        bool need_volume, bool need_weight ) const
+{
+    if( !it.count_by_charges() ) {
+        return { need_volume ? it.charges_per_volume( remaining_volume(), true ) : INT_MAX,
+                 need_weight ? it.charges_per_weight( remaining_weight(), true ) : INT_MAX };
+    }
+    // Same as the two functions above, sharing the stacks_with check per item.
+    units::volume non_it_volume = volume_capacity();
+    units::mass non_it_weight = weight_capacity();
+    int contained_charges = 0;
+    for( const item &contained : contents ) {
+        if( contained.typeId() == it.typeId() && contained.stacks_with( it ) ) {
+            contained_charges += contained.charges;
+        } else {
+            if( need_weight ) {
+                non_it_weight -= contained.weight();
+            }
+            if( need_volume ) {
+                non_it_volume -= contained.volume();
+            }
+        }
+    }
+    return { need_volume ? it.charges_per_volume( non_it_volume, true ) - contained_charges : INT_MAX,
+             need_weight ? it.charges_per_weight( non_it_weight, true ) - contained_charges : INT_MAX };
+}
+
+int item_pocket::charges_per_remaining_space( const item &it ) const
+{
+    const std::pair<int, int> vw = charges_per_remaining_volume_weight( it );
+    return std::min( vw.first, vw.second );
 }
 
 int item_pocket::best_quality( const quality_id &id ) const
