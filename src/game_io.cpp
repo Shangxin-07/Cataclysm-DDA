@@ -589,8 +589,10 @@ bool game::save_maps()
 
     try {
         here.save();
-        overmap_buffer.save(); // can throw
-        MAPBUFFER.save(); // can throw
+        // Saving the map buffer overlaps compressing the overmaps.
+        overmap_buffer.save( []() {
+            MAPBUFFER.save(); // can throw
+        } ); // can throw
         return true;
     } catch( const std::exception &err ) {
         popup( _( "Failed to save the maps: %s" ), err.what() );

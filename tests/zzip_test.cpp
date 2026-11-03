@@ -143,6 +143,43 @@ TEST_CASE( "zzip_compaction", "[.][zzip]" )
     }
 }
 
+TEST_CASE( "zzip_compress_files_matches_add_file", "[zzip]" )
+{
+    std::vector<std::string> contents;
+    for( int i = 0; i < 40; ++i ) {
+        std::string text;
+        for( int j = 0; j <= i * 50; ++j ) {
+            text += R"({"id":)" + std::to_string( j % ( i + 3 ) ) + R"(,"name":"item"},)";
+        }
+        contents.push_back( std::move( text ) );
+    }
+    const std::vector<std::string_view> views( contents.begin(), contents.end() );
+    const std::vector<zzip::compressed_file> compressed = zzip::compress_files( {}, views );
+    REQUIRE( compressed.size() == contents.size() );
+
+    std::shared_ptr<mmap_file> direct_file = mmap_file::map_writeable_memory( 0 );
+    std::shared_ptr<mmap_file> batched_file = mmap_file::map_writeable_memory( 0 );
+    std::optional<zzip> direct = zzip::load( direct_file );
+    std::optional<zzip> batched = zzip::load( batched_file );
+    REQUIRE( direct.has_value() );
+    REQUIRE( batched.has_value() );
+    for( size_t i = 0; i < contents.size(); ++i ) {
+        const std::filesystem::path name = std::filesystem::u8path( std::to_string( i ) + ".json" );
+        REQUIRE( direct->add_file( name, contents[i] ) );
+        REQUIRE( batched->add_compressed_file( name, compressed[i] ) );
+    }
+
+    // Compressing ahead of time on other threads writes the same entries in the same
+    // places. Only the unused space between entries and footer may hold different scraps.
+    REQUIRE( direct_file->len() == batched_file->len() );
+    REQUIRE( direct->get_content_size() == batched->get_content_size() );
+    CHECK( memcmp( direct_file->base(), batched_file->base(), direct->get_content_size() ) == 0 );
+    for( size_t i = 0; i < contents.size(); ++i ) {
+        const std::filesystem::path name = std::filesystem::u8path( std::to_string( i ) + ".json" );
+        CHECK( _view( batched->get_file( name ) ) == contents[i] );
+    }
+}
+
 TEST_CASE( "zzip_deletion", "[.][zzip]" )
 {
     std::unordered_map<std::filesystem::path, std::vector<std::byte>, std_fs_path_hash> files{

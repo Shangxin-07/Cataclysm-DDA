@@ -4,13 +4,17 @@
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <future>
 #include <iterator>
 #include <limits>
 #include <map>
 #include <optional>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <type_traits>
+#include <vector>
 
 #include "basecamp.h"
 #include "calendar.h"
@@ -53,6 +57,7 @@
 #include "translations.h"
 #include "vehicle.h"
 #include "worldfactory.h"
+#include "zzip.h"
 
 static const oter_type_str_id oter_type_bridgehead_ground( "bridgehead_ground" );
 static const oter_type_str_id oter_type_bridgehead_ramp( "bridgehead_ramp" );
@@ -243,11 +248,54 @@ void overmapbuffer::fix_npcs( overmap &new_overmap )
     }
 }
 
-void overmapbuffer::save()
+void overmapbuffer::save( const std::function<void()> &meanwhile )
 {
+    std::vector<overmap_pending_terrain> pending;
     for( auto &omp : overmaps ) {
         // Note: this may throw io errors from std::ofstream
-        omp.second->save();
+        omp.second->save( &pending );
+    }
+
+    const std::filesystem::path dictionary = ( PATH_INFO::world_base_save_path() /
+            "overmaps.dict" ).get_unrelative_path();
+    std::vector<std::string_view> contents;
+    contents.reserve( pending.size() );
+    for( const overmap_pending_terrain &terrain : pending ) {
+        contents.emplace_back( terrain.data );
+    }
+    // Waits for the compression even if meanwhile throws, before pending goes away.
+    std::future<std::vector<zzip::compressed_file>> compressing;
+    if( !pending.empty() ) {
+        compressing = zzip::compress_files_async( dictionary, std::move( contents ) );
+    }
+    if( meanwhile ) {
+        meanwhile();
+    }
+    if( pending.empty() ) {
+        return;
+    }
+
+    const std::vector<zzip::compressed_file> files = compressing.get();
+    if( files.size() != pending.size() ) {
+        throw std::runtime_error( "Failed to compress overmaps" );
+    }
+    for( size_t i = 0; i < pending.size(); ++i ) {
+        const overmap_pending_terrain &terrain = pending[i];
+        std::optional<zzip> z = zzip::load( terrain.zzip_path.get_unrelative_path(), dictionary );
+        if( !z ) {
+            throw std::runtime_error( string_format( "Failed to open %s",
+                                      terrain.zzip_path.get_unrelative_path().generic_u8string() ) );
+        }
+        if( !z->add_compressed_file( terrain.file_name, files[i] ) ) {
+            throw std::runtime_error( string_format( "Failed to save %s to %s",
+                                      terrain.file_name.generic_u8string(),
+                                      terrain.zzip_path.get_unrelative_path().generic_u8string() ) );
+        }
+        cata_path tmp_path = terrain.zzip_path + ".tmp";
+        if( z->compact_to( tmp_path.get_unrelative_path(), 2.0 ) ) {
+            z.reset();
+            rename_file( tmp_path, terrain.zzip_path );
+        }
     }
 }
 

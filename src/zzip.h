@@ -6,8 +6,10 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <future>
 #include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <unordered_set>
 #include <vector>
@@ -86,6 +88,37 @@ class zzip
          * we can't until c++20.
          */
         bool add_file( std::filesystem::path const &zzip_relative_path, std::string_view content );
+
+        /** A file's contents compressed ahead of time by compress_files. */
+        struct compressed_file {
+            std::string frame;
+            // Size before compression, so the zzip grows exactly as add_file would grow it.
+            size_t content_size = 0;
+        };
+
+        /**
+         * Compresses each of the given contents exactly as add_file would with the given
+         * dictionary, spreading the work over several threads. Write the results with
+         * add_compressed_file into a zzip loaded with the same dictionary.
+         * Returns an empty vector on any error.
+         */
+        static std::vector<compressed_file> compress_files( std::filesystem::path const &dictionary,
+                const std::vector<std::string_view> &contents );
+
+        /**
+         * Starts compress_files on another thread and returns at once. The contents must stay
+         * alive and unchanged until the result has been taken from the future.
+         */
+        static std::future<std::vector<compressed_file>> compress_files_async(
+                    std::filesystem::path const &dictionary, std::vector<std::string_view> contents );
+
+        /**
+         * Writes a file made by compress_files under the given file path into the zzip.
+         * The entry is written exactly where and as add_file would have written it.
+         * Returns true on success, false on any error.
+         */
+        bool add_compressed_file( std::filesystem::path const &zzip_relative_path,
+                                  const compressed_file &compressed );
 
         /**
          * Directly copies compressed entries from one zzip to another, keeping the same path.
@@ -216,7 +249,10 @@ class zzip
         JsonObject copy_footer() const;
         size_t ensure_capacity_for( size_t bytes );
         size_t write_file_at( std::string_view filename, std::string_view content, size_t offset,
-                              std::optional<uint64_t> force_checksum = std::nullopt );
+                              std::optional<uint64_t> force_checksum = std::nullopt,
+                              bool content_is_compressed = false );
+        bool append_file( std::filesystem::path const &zzip_relative_path, std::string_view content,
+                          size_t content_size, bool content_is_compressed );
 
         bool update_footer( JsonObject const &original_footer, size_t content_end,
                             const std::vector<compressed_entry> &entries, bool shrink_to_fit = false );
